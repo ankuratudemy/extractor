@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y default-jre wget ca-certificates openss
 RUN update-ca-certificates
 
 # Download the Tika app JAR from Apache Hub
-RUN wget -O ./tika-app.jar --no-check-certificate https://downloads.apache.org/tika/tika-app-1.29.jar
+RUN wget -O ./tika-app.jar --no-check-certificate https://downloads.apache.org/tika/3.0.0-BETA/tika-app-3.0.0-BETA.jar
 
 
 COPY requirements.txt .
