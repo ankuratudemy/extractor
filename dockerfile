@@ -4,12 +4,15 @@ FROM python:3.9
 # Set the working directory in the container
 WORKDIR /app
 
-# Install Java
-RUN apt-get update && apt-get install -y default-jre
+# Install Java, wget, and SSL dependencies
+RUN apt-get update && apt-get install -y default-jre wget ca-certificates openssl
+
+# Download the latest CA certificates
+RUN update-ca-certificates
 
 # Download the Tika app JAR from Apache Hub
-RUN wget -O ./tika-app.jar https://downloads.apache.org/tika/tika-app-2.9.1.jar
-# Copy the requirements file to the container
+RUN wget -O ./tika-app.jar --no-check-certificate https://downloads.apache.org/tika/tika-app-1.29.jar
+
 
 COPY requirements.txt .
 COPY ./shared /app/shared
