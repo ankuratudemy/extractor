@@ -25,7 +25,7 @@ def split_pdf(pdf_data):
     pages = []
     pdf_reader = PdfFileReader(io.BytesIO(pdf_data))
     num_pages = pdf_reader.getNumPages()
-    
+    log.info(f'Number of pages: {num_pages}')
     with concurrent.futures.ProcessPoolExecutor() as executor:
         page_indexes = range(num_pages)
         # Use functools.partial to create a partial function with pdf_data as a fixed argument
@@ -55,6 +55,7 @@ def process_page(page_data):
             stderr=subprocess.PIPE
         )
         stdout, stderr = process.communicate(input=page_data.read())
+        log.error(stderr)
         extracted_text = stdout.decode('utf-8')
 
         end_time_page = time.time()  # Record the end time

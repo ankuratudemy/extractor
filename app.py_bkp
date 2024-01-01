@@ -1,6 +1,6 @@
 import os
 import io
-from flask import Flask, request, make_response
+from flask import Flask, request
 from werkzeug.utils import secure_filename
 from shared import pdf_processor
 import json
@@ -57,7 +57,7 @@ def extract_text():
         num_cpus = multiprocessing.cpu_count()
         log.info(num_cpus)
 
-        # Process the pages concurrently using multiple processes
+         # Process the pages concurrently using multiple processes
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_cpus) as executor:
             results = executor.map(pdf_processor.process_page, pages)
 
@@ -69,31 +69,17 @@ def extract_text():
                 'text': result.strip()
             }
             json_output.append(page_obj)
+        json_string = json.dumps(json_output, indent=4)
 
         log.info(f"Extraction successful for file: {filename}")
 
         # Delete the temporary file
         os.remove(temp_file_path)
 
-        # Send the PDF or converted PDF file as the response
-        if file_extension == 'pdf':
-            return send_file_as_attachment(temp_file_path, filename)
-        else:
-            pdf_filename = os.path.splitext(filename)[0] + '.pdf'
-            pdf_temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_filename)
-            with open(pdf_temp_file_path, 'wb') as f:
-                f.write(pdf_data)
-            return send_file_as_attachment(pdf_temp_file_path, pdf_filename)
+        return json_string
     else:
         log.error('No file uploaded')
         return 'No file uploaded.', 400
-
-
-def send_file_as_attachment(file_path, filename):
-    with open(file_path, 'rb') as f:
-        response = make_response(f.read())
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
 
 
 def convert_to_pdf(file_path, file_extension):
@@ -107,6 +93,7 @@ def convert_to_pdf(file_path, file_extension):
         command = [
             'soffice',
             '--headless',
+            '--infilter="Office Open XML Text',
             '--convert-to',
             'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"17"}, "UseTaggedPDF": {"type":"boolean","value":"true"}}',
             '--outdir',
@@ -132,6 +119,5 @@ def convert_to_pdf(file_path, file_extension):
     except Exception as e:
         log.error(f'Error during PDF conversion: {str(e)}')
         return None
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

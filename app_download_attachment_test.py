@@ -69,6 +69,7 @@ def extract_text():
                 'text': result.strip()
             }
             json_output.append(page_obj)
+        json_string = json.dumps(json_output, indent=4)
 
         log.info(f"Extraction successful for file: {filename}")
 
@@ -105,7 +106,7 @@ def convert_to_pdf(file_path, file_extension):
 
         # Convert the file to PDF using LibreOffice
         command = [
-            'soffice',
+            '/opt/libreoffice7.6/program/soffice',
             '--headless',
             '--convert-to',
             'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"17"}, "UseTaggedPDF": {"type":"boolean","value":"true"}}',
