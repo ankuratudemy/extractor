@@ -25,18 +25,20 @@ def extract_text():
     if uploaded_file:
         # Save the uploaded file to a temporary location
         filename = secure_filename(uploaded_file.filename)
-        temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        uploaded_file.save(temp_file_path)
-
         file_extension = os.path.splitext(filename)[1][1:].lower()
-
+        temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        
         if file_extension == 'pdf':
+            # Read the PDF file directly from memory
+            pdf_data = uploaded_file.read()
+
             # Measure the time taken to split the PDF
             start_time = time.time()
-            pages = pdf_processor.split_pdf(uploaded_file.read())
+            pages = pdf_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
             log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
-        elif file_extension in ['ppt', 'docx', 'doc']:
+        elif file_extension in ['ppt', 'pptx', 'docx', 'doc']:
+            uploaded_file.save(temp_file_path)
             # Convert the file to PDF using LibreOffice
             pdf_data = convert_to_pdf(temp_file_path, file_extension)
 
@@ -69,21 +71,17 @@ def extract_text():
                 'text': result.strip()
             }
             json_output.append(page_obj)
-
+        json_string = json.dumps(json_output, indent=4)
         log.info(f"Extraction successful for file: {filename}")
 
-        # Delete the temporary file
-        os.remove(temp_file_path)
-
-        # Send the PDF or converted PDF file as the response
-        if file_extension == 'pdf':
-            return send_file_as_attachment(temp_file_path, filename)
-        else:
-            pdf_filename = os.path.splitext(filename)[0] + '.pdf'
-            pdf_temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_filename)
-            with open(pdf_temp_file_path, 'wb') as f:
-                f.write(pdf_data)
-            return send_file_as_attachment(pdf_temp_file_path, pdf_filename)
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+        # pdf_filename = os.path.splitext(filename)[0] + '.pdf'
+        # pdf_temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_filename)
+        # with open(pdf_temp_file_path, 'wb') as f:
+        #     f.write(pdf_data)
+        # return send_file_as_attachment(pdf_temp_file_path, pdf_filename)
+        return json_string
     else:
         log.error('No file uploaded')
         return 'No file uploaded.', 400
