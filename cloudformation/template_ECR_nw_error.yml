@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.0.0/20
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+
+  ExtractorTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: extractor-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ExtractorTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: extractor
+      ExecutionRoleArn: !Ref ExtractorTaskExecutionRole
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: "4096"
+      Memory: "8192"
+      ContainerDefinitions:
+        - Name: extractor
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/extractor:latest
+          PortMappings:
+            - ContainerPort: 5000
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/extractor
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: extractor
+
+  ExtractorService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      TaskDefinition: !Ref ExtractorTaskDefinition
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref Subnet
+
+  ApiGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: extractor-api
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  ApiGatewayIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ExtractorService.Arn}/invocations
+      IntegrationMethod: POST
+      ConnectionType: VPC_LINK
+      ConnectionId: !Ref VpcLink
+
+  ApiGatewayRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: $connect
+      Target: !Join ["/", ["integrations", !Ref ApiGatewayIntegration]]
+
+  ApiGatewayIntegrationResponse:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationId: !Ref ApiGatewayIntegration
+      IntegrationResponseKey: default
+
+  VpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Properties:
+      Name: extractor-vpclink
+      SubnetIds:
+        - !Ref Subnet
+      SecurityGroupIds:
+        - !Ref ExtractorSecurityGroup
+
+  ExtractorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound access on port 443
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+  EcrVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcId: !Ref Vpc
+      SubnetIds: 
+        - !Ref Subnet
+
+Outputs:
+  ApiGatewayEndpoint:
+    Description: API Gateway Endpoint
+    Value: !Sub wss://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/extractor
