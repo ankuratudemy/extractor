@@ -1,31 +1,30 @@
 # Use the official Python image as the base image
-FROM python:3.10
+FROM python:3.10-slim
 
 # Set the working directory in the container
 WORKDIR /app
+
+# Install Java, wget, and SSL dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends default-jre libreoffice-java-common wget ca-certificates openssl apt-transport-https libreoffice unoconv fontconfig
+# # Download the latest CA certificates
+# RUN update-ca-certificates
 # Download the Tika app JAR from Apache Hub
 RUN wget -O ./tika-app.jar --no-check-certificate https://downloads.apache.org/tika/3.0.0-BETA/tika-app-3.0.0-BETA.jar
-# Install Java, wget, and SSL dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends default-jre wget ca-certificates openssl apt-transport-https software-properties-common
-# Download the latest CA certificates
-RUN update-ca-certificates
-
 # Install the required Python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN echo "deb http://deb.debian.org/debian buster contrib" >> /etc/apt/sources.list
-RUN echo "deb-src http://deb.debian.org/debian buster contrib" >> /etc/apt/sources.list
+# RUN echo "deb http://deb.debian.org/debian buster contrib" >> /etc/apt/sources.list
+# RUN echo "deb-src http://deb.debian.org/debian buster contrib" >> /etc/apt/sources.list
 
-# RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
-# RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+# # RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+# # RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
 
-# RUN echo 'deb http://http.us.debian.org/debian jessie main contrib non-free' >> /etc/apt/sources.list
-RUN cat /etc/apt/sources.list
-# RUN apt-get update && apt-get install -y --no-install-recommends ttf-mscorefonts-installer
-RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
-RUN apt-get update && apt-get install -y libreoffice unoconv fontconfig
-# RUN apt-get install -y fonts-roboto fonts-firacode fonts-open-sans
+# # RUN echo 'deb http://http.us.debian.org/debian jessie main contrib non-free' >> /etc/apt/sources.list
+# RUN cat /etc/apt/sources.list
+# # RUN apt-get update && apt-get install -y --no-install-recommends ttf-mscorefonts-installer
+# RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
+
 RUN rm -Rf /usr/share/fonts/*
 RUN ls -ltr /usr/share/fonts
 COPY /fonts/* /usr/share/fonts
