@@ -1,0 +1,22 @@
+# extractor-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: extractor-tika-server-deployment
+spec:
+  replicas: 3  # Adjust the number of replicas based on your scaling requirements
+  selector:
+    matchLabels:
+      app: extractor-tika-server
+  template:
+    metadata:
+      labels:
+        app: extractor-tika-server
+    spec:
+      containers:
+        - name: extractor-tika-server
+          image: registry.digitalocean.com/extractor-registry/extractor-tika-server:latest-do
+          imagePullSecrets:
+          - name: registry-extractor-registry
+          ports:
+            - containerPort: 9998

@@ -1,0 +1,76 @@
+#Digital Ocean manamentment:
+
+
+Create image registry:
+
+doctl registry create extractor-registry
+
+Name                  Endpoint                                        Region slug
+extractor-registry    registry.digitalocean.com/extractor-registry    sfo2
+
+doctl registry login
+
+
+docker tag extractor registry.digitalocean.com/extractor-registry/extractor:latest-do
+docker push registry.digitalocean.com/extractor-registry/extractor:latest-do
+
+docker tag extractor-tika-server registry.digitalocean.com/extractor-registry/extractor-tika-server:latest-do
+docker push registry.digitalocean.com/extractor-registry/extractor-registry/extractor-tika-server:latest-do
+
+
+VPC create -- free
+ doctl vpcs create --name extractor-vpc --region nyc3
+
+
+ PS C:\Users\ankur\WORK\SaaS\extractor> doctl vpcs create --name extractor-vpc --region nyc3
+ID                                      URN                                            Name             Description    IP Range          Region    Created At                                 Default
+17a0e08c-4820-4e3e-952b-66b9066c4379    do:vpc:17a0e08c-4820-4e3e-952b-66b9066c4379    extractor-vpc                   10.108.16.0/20    nyc3      2024-01-12 21:24:10.787966856 +0000 UTC    false
+
+
+
+nane: extractor-VPC
+
+
+Create cluster:
+
+doctl kubernetes cluster create extractor-cluster --tag extractor --auto-upgrade=true --node-pool "name=extractor-pool;count=2;auto-scale=true;min-nodes=1;max-nodes=3;tag=extractor"
+doctl kubernetes cluster create extractor-cluster --vpc-uuid 17a0e08c-4820-4e3e-952b-66b9066c4379 --region nyc3 --tag extractor --auto-upgrade=true --node-pool "name=extractor-pool;count=2;auto-scale=true;min-nodes=1;max-nodes=3;tag=extractor"
+
+
+
+Save kubectl config:
+
+ doctl kubernetes cluster kubeconfig save extractor-cluster
+
+create secret reistry:
+
+ doctl registry kubernetes-manifest | kubectl apply -f -
+
+PS C:\Users\ankur\WORK\SaaS\extractor> doctl registry kubernetes-manifest | kubectl apply -f -
+>>
+secret/registry-extractor-registry created
+
+
+
+Configure kubernetes to to use this secret to pull images:
+
+kubectl patch serviceaccount default --patch '{\"imagePullSecrets\": [{\"name\": \"registry-extractor-registry\"}]}'
+
+doctl kubernetes cluster registry add <cluster-id|cluster-name> <cluster-id|cluster-name> [flags]
+
+### HELM CHARTS:
+
+choco install kubernetes-helm
+helm create extractor-chart
+
+
+
+helm package extractor-chart
+helm install my-release ./extractor-chart-1.0.0.tgz
+
+helm upgrade my-release ./extractor-chart-1.0.0.tgz
+
+# Get external load balancer ip
+
+kubectl get services
+

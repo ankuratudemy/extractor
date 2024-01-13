@@ -1,0 +1,24 @@
+# extractor-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: extractor-deployment
+spec:
+  replicas: 3  # Adjust the number of replicas based on your scaling requirements
+  selector:
+    matchLabels:
+      app: extractor
+  template:
+    metadata:
+      labels:
+        app: extractor
+    spec:
+      containers:
+        - name: extractor
+          image: registry.digitalocean.com/extractor-registry/extractor:1.0.0-do
+          imagePullSecrets:
+          - name: registry-extractor-registry
+          ports:
+            - containerPort: 5000
+
+

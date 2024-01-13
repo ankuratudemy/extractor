@@ -1,6 +1,6 @@
 import os
 import io
-from flask import Flask, request, make_response
+from flask import Flask, request
 from werkzeug.utils import secure_filename
 from shared import pdf_processor
 import json
@@ -9,14 +9,31 @@ import multiprocessing
 import time
 import sys
 import tempfile
+import requests
+import aiohttp
+import asyncio
+import threading
+
 sys.path.append('../')
 from shared.logging_config import log
 
 app = Flask(__name__)
-# app.debug = os.environ.get('FLASK_ENV') == 'development'
 
 UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
+
+
+def get_event_loop():
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return json.dumps({"status": "ok"})
 
 @app.route('/extract', methods=['POST'])
 def extract_text():
@@ -27,7 +44,7 @@ def extract_text():
         filename = secure_filename(uploaded_file.filename)
         file_extension = os.path.splitext(filename)[1][1:].lower()
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        
+
         if file_extension == 'pdf':
             # Read the PDF file directly from memory
             pdf_data = uploaded_file.read()
@@ -37,6 +54,7 @@ def extract_text():
             pages = pdf_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
             log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
+
         elif file_extension in ['ppt', 'pptx', 'docx', 'doc']:
             uploaded_file.save(temp_file_path)
             # Convert the file to PDF using LibreOffice
@@ -55,13 +73,12 @@ def extract_text():
             log.error('Unsupported file format')
             return 'Unsupported file format.', 400
 
-        # Get the number of available CPUs
-        num_cpus = multiprocessing.cpu_count()
-        log.info(num_cpus)
+        # # Get the number of available CPUs
+        # num_cpus = multiprocessing.cpu_count()
+        # log.info(num_cpus)
 
-        # Process the pages concurrently using multiple processes
-        with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
-            results = executor.map(pdf_processor.process_page, pages)
+        loop = get_event_loop()
+        results = loop.run_until_complete(process_pages_async(pages))
 
         # Build the JSON output
         json_output = []
@@ -74,20 +91,12 @@ def extract_text():
         json_string = json.dumps(json_output, indent=4)
         log.info(f"Extraction successful for file: {filename}")
 
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        # if os.path.exists(temp_file_path):
+        #     os.remove(temp_file_path)
         return json_string
     else:
         log.error('No file uploaded')
         return 'No file uploaded.', 400
-
-
-def send_file_as_attachment(file_path, filename):
-    with open(file_path, 'rb') as f:
-        response = make_response(f.read())
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
-
 
 def convert_to_pdf(file_path, file_extension):
     import subprocess
@@ -125,6 +134,20 @@ def convert_to_pdf(file_path, file_extension):
     except Exception as e:
         log.error(f'Error during PDF conversion: {str(e)}')
         return None
+
+async def async_put_request(session, url, payload, headers):
+    async with session.put(url, data=payload, headers=headers) as response:
+        return await response.text()
+    
+async def process_pages_async(pages):
+    url = "http://extractor-tika-server-service:9998/tika"
+    headers = {'Accept': 'text/plain', 'Content-Type': 'application/pdf'}
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [async_put_request(session, url, page, headers) for page in pages]
+        results = await asyncio.gather(*tasks)
+
+    return results
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
