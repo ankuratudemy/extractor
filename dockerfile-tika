@@ -21,7 +21,7 @@ COPY app-tika.py .
 RUN mkdir /app/uploads
 
 # Expose port 5000 for the Flask application
-EXPOSE 5001
+EXPOSE 5000
 
 # Set the entrypoint command to run the Flask application
 CMD ["python3", "app-tika.py"]
