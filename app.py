@@ -22,6 +22,7 @@ app = Flask(__name__)
 UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 
+TIKA_FUNCTION = os.environ.get('TIKA_FUNCTION')
 
 def get_event_loop():
     try:
@@ -37,13 +38,91 @@ def health_check():
 
 @app.route('/extract', methods=['POST'])
 def extract_text():
+    # # Access headers
+    # all_headers = request.headers
+
+    # # Print all headers
+    # print("All Headers:")
+    # for key, value in all_headers.items():
+    #     print(f"{key}: {value}")
+
+    # # Access a specific header
+    # content_type_header = request.headers.get('Content-Type')
+    # print(f"\nContent-Type Header: {content_type_header}")
+
+    
     uploaded_file = request.files['file']
 
     if uploaded_file:
         # Save the uploaded file to a temporary location
         filename = secure_filename(uploaded_file.filename)
-        file_extension = os.path.splitext(filename)[1][1:].lower()
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        print(uploaded_file.content_type)
+        
+        oFileExtMap = {
+            "application/octet-stream": "use_extension", # use file extension if content type is octet-stream
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "application/pdf": "pdf",
+            "application/vnd.oasis.opendocument.text": "odt",
+            "application/vnd.oasis.opendocument.spreadsheet": "ods",
+            "application/vnd.oasis.opendocument.presentation": "odp",
+            "application/vnd.oasis.opendocument.graphics": "odg",
+            "application/vnd.oasis.opendocument.formula": "odf",
+            "application/vnd.oasis.opendocument.flat.text": "fodt",
+            "application/vnd.oasis.opendocument.flat.spreadsheet": "fods",
+            "application/vnd.oasis.opendocument.flat.presentation": "fodp",
+            "application/vnd.oasis.opendocument.flat.graphics": "fodg",
+            "application/vnd.oasis.opendocument.spreadsheet-template": "ots",
+            "application/vnd.oasis.opendocument.flat.spreadsheet-template": "fots",
+            "application/vnd.lotus-1-2-3": "123",
+            "application/dbase": "dbf",
+            "text/html": "html",
+            "application/vnd.lotus-screencam": "scm",
+            "text/csv": "csv",
+            "application/vnd.ms-excel": "xls",
+            "application/vnd.ms-excel.template.macroenabled.12": "xltm",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.template": 'dotx',
+            "application/vnd.ms-word.document.macroenabled.12": 'docm',
+            "application/vnd.ms-word.template.macroenabled.12": 'dotm',
+            "application/xml": 'xml',
+            "application/msword": 'doc',
+            "application/vnd.ms-word.document.macroenabled.12": 'docm',
+            "application/vnd.ms-word.template.macroenabled.12": 'dotm',
+            "application/rtf": 'rtf',
+            "application/wordperfect": 'wpd',
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 'xlsx',
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.template": 'xltx',
+            "application/vnd.ms-excel.sheet.macroenabled.12": 'xlsm',
+            "application/vnd.ms-excel.template.macroenabled.12": 'xltm',
+            "application/vnd.corelqpw": 'qpw',
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": 'pptx',
+            "application/vnd.openxmlformats-officedocument.presentationml.slideshow": 'ppsx',
+            "application/vnd.openxmlformats-officedocument.presentationml.slide": 'ppmx',
+            "application/vnd.openxmlformats-officedocument.presentationml.template": 'potx',
+            "application/vnd.ms-powerpoint": 'ppt',
+            "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
+            "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
+            "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
+            "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
+            "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
+            "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
+            "application/vnd.ms-powerpoint": 'ppt',
+            "application/vnd.ms-powerpoint.slideshow": 'pps',
+            "application/vnd.ms-powerpoint.presentation": 'ppt',
+            "application/vnd.ms-powerpoint.addin": 'ppa',
+        }
+
+
+        if uploaded_file.content_type not in oFileExtMap:
+            print('Invalid file extension')
+
+        file_extension = oFileExtMap[ uploaded_file.content_type ]
+        
+        if file_extension == 'use_extension':
+            file_extension = os.path.splitext(filename)[1][1:].lower()
+
+        print(file_extension)
+        print(filename)
 
         if file_extension == 'pdf':
             # Read the PDF file directly from memory
@@ -55,7 +134,7 @@ def extract_text():
             split_time = time.time() - start_time
             log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
 
-        elif file_extension in ['ppt', 'pptx', 'docx', 'doc']:
+        elif file_extension in ['docx', 'pdf', 'odt', 'ods', 'odp', 'odg', 'odf', 'fodt', 'fods', 'fodp', 'fodg', 'ots', 'fots', '123', 'dbf', 'html', 'scm', 'csv', 'xls', 'xltm', 'dotx', 'docm', 'dotm', 'xml', 'doc', 'xltx', 'xlsm', 'xltm', 'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
             uploaded_file.save(temp_file_path)
             # Convert the file to PDF using LibreOffice
             pdf_data = convert_to_pdf(temp_file_path, file_extension)
@@ -80,14 +159,15 @@ def extract_text():
         loop = get_event_loop()
         results = loop.run_until_complete(process_pages_async(pages))
 
-        # Build the JSON output
+        # Build the JSON output using mapped_results
         json_output = []
-        for page_num, result in enumerate(results, start=1):
+        for result, page_num in results:
             page_obj = {
                 'page': page_num,
                 'text': result.strip()
             }
             json_output.append(page_obj)
+
         json_string = json.dumps(json_output, indent=4)
         log.info(f"Extraction successful for file: {filename}")
 
@@ -107,8 +187,9 @@ def convert_to_pdf(file_path, file_extension):
 
         # Convert the file to PDF using LibreOffice
         command = [
-            'soffice',
+            '/opt/libreoffice7.6/program/soffice',
             '--headless',
+            '--nodefault',
             '--convert-to',
             'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"17"}, "UseTaggedPDF": {"type":"boolean","value":"true"}}',
             '--outdir',
@@ -135,19 +216,22 @@ def convert_to_pdf(file_path, file_extension):
         log.error(f'Error during PDF conversion: {str(e)}')
         return None
 
-async def async_put_request(session, url, payload, headers):
+async def async_put_request(session, url, payload, page_num, headers):
     async with session.put(url, data=payload, headers=headers) as response:
-        return await response.text()
-    
+        return await response.text(), page_num
+
 async def process_pages_async(pages):
-    url = "http://extractor-tika-server-service:9998/tika"
+    url = TIKA_FUNCTION
     headers = {'Accept': 'text/plain', 'Content-Type': 'application/pdf'}
 
     async with aiohttp.ClientSession() as session:
-        tasks = [async_put_request(session, url, page, headers) for page in pages]
+        tasks = [async_put_request(session, url, page_data, page_num, headers) for page_num, page_data in pages]
         results = await asyncio.gather(*tasks)
 
-    return results
+    # Map results to their corresponding page numbers
+    mapped_results = [(result, page_num) for (result, page_num) in results]
+
+    return mapped_results
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

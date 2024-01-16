@@ -20,6 +20,7 @@ RUN ls /opt/
 # RUN ln -s /opt/libreoffice7.6/program/soffice /usr/local/bin/lowriter
 
 RUN /opt/libreoffice7.6/program/soffice --version
+RUN soffice --version
 # Install Java, wget, and SSL dependencies
 
 

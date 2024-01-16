@@ -1,8 +1,8 @@
 flask
-PyPDF2<3.0.0
 pycryptodome
-awslambdaric
 boto3
 aiohttp
 requests
 asyncio
+gunicorn
+PyMuPDF
