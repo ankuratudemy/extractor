@@ -24,16 +24,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RUN echo "deb http://deb.debian.org/debian buster contrib" >> /etc/apt/sources.list
 # RUN echo "deb-src http://deb.debian.org/debian buster contrib" >> /etc/apt/sources.list
 
-# # RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
-# # RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
 
 # # RUN echo 'deb http://http.us.debian.org/debian jessie main contrib non-free' >> /etc/apt/sources.list
 # RUN cat /etc/apt/sources.list
-# # RUN apt-get update && apt-get install -y --no-install-recommends ttf-mscorefonts-installer
-# RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
+# RUN apt-get update && apt-get install -y --no-install-recommends ttf-mscorefonts-installer
+RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
 
 # RUN rm -Rf /usr/share/fonts/*
-# RUN ls -ltr /usr/share/fonts
+RUN ls -ltr /usr/share/fonts
 COPY /fonts/* /usr/share/fonts
 RUN ls -ltr /usr/share/fonts
 RUN fc-cache -f -v

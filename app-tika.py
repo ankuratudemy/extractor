@@ -2,7 +2,7 @@ import os
 import io
 from flask import Flask, request, make_response
 from werkzeug.utils import secure_filename
-from shared import pdf_processor
+from shared import file_processor
 import json
 import concurrent.futures
 import multiprocessing
@@ -34,7 +34,7 @@ def extract_text():
 
             # Measure the time taken to split the PDF
             start_time = time.time()
-            pages = pdf_processor.split_pdf(pdf_data)
+            pages = file_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
             log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
         elif file_extension in ['ppt', 'pptx', 'docx', 'doc']:
@@ -45,7 +45,7 @@ def extract_text():
             if pdf_data:
                 # Measure the time taken to split the PDF
                 start_time = time.time()
-                pages = pdf_processor.split_pdf(pdf_data)
+                pages = file_processor.split_pdf(pdf_data)
                 split_time = time.time() - start_time
                 log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
             else:
@@ -61,7 +61,7 @@ def extract_text():
 
         # Process the pages concurrently using multiple processes
         with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
-            results = executor.map(pdf_processor.process_page, pages)
+            results = executor.map(file_processor.process_page, pages)
 
         # Build the JSON output
         json_output = []

@@ -2,7 +2,7 @@ import os
 import io
 from flask import Flask, request
 from werkzeug.utils import secure_filename
-from shared import pdf_processor
+from shared import file_processor
 import json
 import concurrent.futures
 import multiprocessing
@@ -22,7 +22,8 @@ app = Flask(__name__)
 UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 
-TIKA_FUNCTION = os.environ.get('TIKA_FUNCTION')
+SERVER_URL = f"http://{os.environ.get('SERVER_URL')}/tika"
+# TIKA_FUNCTION = "http://host.docker.internal:9998/tika"
 
 def get_event_loop():
     try:
@@ -50,7 +51,7 @@ def extract_text():
     # content_type_header = request.headers.get('Content-Type')
     # print(f"\nContent-Type Header: {content_type_header}")
 
-    
+    contentType='application/pdf'
     uploaded_file = request.files['file']
 
     if uploaded_file:
@@ -69,7 +70,6 @@ def extract_text():
             "application/vnd.oasis.opendocument.graphics": "odg",
             "application/vnd.oasis.opendocument.formula": "odf",
             "application/vnd.oasis.opendocument.flat.text": "fodt",
-            "application/vnd.oasis.opendocument.flat.spreadsheet": "fods",
             "application/vnd.oasis.opendocument.flat.presentation": "fodp",
             "application/vnd.oasis.opendocument.flat.graphics": "fodg",
             "application/vnd.oasis.opendocument.spreadsheet-template": "ots",
@@ -111,7 +111,8 @@ def extract_text():
             "application/vnd.ms-powerpoint.presentation": 'ppt',
             "application/vnd.ms-powerpoint.addin": 'ppa',
         }
-
+        # Reverse mapping of content types to file extensions
+        reverse_file_ext_map = {v: k for k, v in oFileExtMap.items()}
 
         if uploaded_file.content_type not in oFileExtMap:
             print('Invalid file extension')
@@ -130,11 +131,21 @@ def extract_text():
 
             # Measure the time taken to split the PDF
             start_time = time.time()
-            pages = pdf_processor.split_pdf(pdf_data)
+            pages = file_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
             log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
+        
+        elif file_extension in ['csv', 'xls', 'xltm', 'xltx', 'xlsx', 'tsv', 'ots']:
+            pages = file_processor.split_excel(uploaded_file.read())
+            contentType = reverse_file_ext_map.get(file_extension, '')
 
-        elif file_extension in ['docx', 'pdf', 'odt', 'ods', 'odp', 'odg', 'odf', 'fodt', 'fods', 'fodp', 'fodg', 'ots', 'fots', '123', 'dbf', 'html', 'scm', 'csv', 'xls', 'xltm', 'dotx', 'docm', 'dotm', 'xml', 'doc', 'xltx', 'xlsm', 'xltm', 'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
+        elif file_extension in ['ods']:
+            print("here")
+            pages = file_processor.split_ods(uploaded_file.read())
+            print(pages)
+            contentType = reverse_file_ext_map.get(file_extension, '')
+
+        elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'html', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
             uploaded_file.save(temp_file_path)
             # Convert the file to PDF using LibreOffice
             pdf_data = convert_to_pdf(temp_file_path, file_extension)
@@ -142,7 +153,7 @@ def extract_text():
             if pdf_data:
                 # Measure the time taken to split the PDF
                 start_time = time.time()
-                pages = pdf_processor.split_pdf(pdf_data)
+                pages = file_processor.split_pdf(pdf_data)
                 split_time = time.time() - start_time
                 log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
             else:
@@ -157,7 +168,7 @@ def extract_text():
         # log.info(num_cpus)
 
         loop = get_event_loop()
-        results = loop.run_until_complete(process_pages_async(pages))
+        results = loop.run_until_complete(process_pages_async(pages, contentType))
 
         # Build the JSON output using mapped_results
         json_output = []
@@ -220,9 +231,9 @@ async def async_put_request(session, url, payload, page_num, headers):
     async with session.put(url, data=payload, headers=headers) as response:
         return await response.text(), page_num
 
-async def process_pages_async(pages):
-    url = TIKA_FUNCTION
-    headers = {'Accept': 'text/plain', 'Content-Type': 'application/pdf'}
+async def process_pages_async(pages, contentType):
+    url = SERVER_URL
+    headers = {'Accept': 'text/plain', 'Content-Type': contentType}
 
     async with aiohttp.ClientSession() as session:
         tasks = [async_put_request(session, url, page_data, page_num, headers) for page_num, page_data in pages]

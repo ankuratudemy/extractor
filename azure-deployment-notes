@@ -1,0 +1,10 @@
+ az group create --name extractor --location centralus
+
+ az acr create --resource-group extractor --name extractor --sku Basic --location centralus
+ az acr login --name extractor
+ az acr repository list --name extractor --output table
+
+ 
+
+
+az deployment group create --resource-group extractor --name extractor --template-file "./extractor-full.bicep" --parameters extractorContainerImage="extractor.azurecr.io/extractor-ca" extractorContainerTag=2.0.2 extarctorServerContainerImage="extractor.azurecr.io/extractor-tika-server-ca" extarctorServerContainerTag=1.0.0 vnetName=extractor containerAppSubnetName=extractor-subnet rgLocation=centralus cappEnvName=extractor-dev cappLogAnalyticsName=extractorLAW

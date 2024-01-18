@@ -6,3 +6,7 @@ requests
 asyncio
 gunicorn
 PyMuPDF
+pandas
+openpyxl
+pyexcel 
+pyexcel-ods

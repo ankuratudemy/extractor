@@ -3,9 +3,13 @@ import sys
 import json
 import fitz  # PyMuPDF library
 import concurrent.futures
+import pandas as pd
 import subprocess
+import pyexcel as pe
 import functools
 import io
+from io import BytesIO
+import pandas as pd
 import time
 sys.path.append('../')
 from .logging_config import log
@@ -34,6 +38,44 @@ from .logging_config import log
 #         pages = list(page_data_results)
     
 #     return pages
+def split_excel(excel_bytes):
+    # Read the Excel bytes data into a dictionary of DataFrames
+    dfs = pd.read_excel(BytesIO(excel_bytes), sheet_name=None, engine='openpyxl')
+
+    # Create a list of tuples with sheet names and corresponding data as BytesIO
+    result = [(name, BytesIO()) for name in dfs]
+    print(result)
+    # Write each DataFrame to the corresponding BytesIO object
+    for name, bio in result:
+        dfs[name].to_excel(bio, index=False, engine='openpyxl')
+        bio.seek(0)  # Reset the position to the beginning of the BytesIO object
+
+    return result
+
+
+def split_ods(ods_bytes):
+    # Create a dictionary to store sheet name and corresponding BytesIO data
+    result = []
+
+    # Read the ODS file using pandas
+    try:
+        xls = pd.ExcelFile(BytesIO(ods_bytes), engine="odf")
+    except Exception as e:
+        raise ValueError("Invalid ODS file format. Make sure it's a valid spreadsheet in ODS format.") from e
+
+    # Iterate through sheets and store each sheet's name and BytesIO data in a tuple
+    for sheet_name in xls.sheet_names:
+        sheet_data = xls.parse(sheet_name)
+
+        # Convert the DataFrame to BytesIO
+        sheet_bytes = BytesIO()
+        sheet_data.to_excel(sheet_bytes, index=False, engine="odf")
+        sheet_bytes.seek(0)
+
+        result.append((sheet_name, sheet_bytes))
+
+    return result
+
 
 def split_page(page_num, pdf_data):
     pdf_document = fitz.open(stream=pdf_data)
