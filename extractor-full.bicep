@@ -29,6 +29,25 @@ param extarctorServerContainerTag string
 @description('Log Analytics resource name')
 param cappLogAnalyticsName string
 
+param acrClientId string
+
+@secure()
+param acrClientSecret string
+
+// @description('Name of the connected Container Registry')
+// param containerRegistryName string
+
+// resource containerRegistry 'Microsoft.ContainerRegistry/registries@2021-12-01-preview' = {
+//   name: containerRegistryName
+//   location: rgLocation
+//   sku: {
+//     name: 'Basic'
+//   }
+//   properties: {
+//     adminUserEnabled: true
+//   }
+// }
+
 resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
   name: vnetName
   location: rgLocation
@@ -85,13 +104,16 @@ resource containerAppEnvironment 'Microsoft.App/managedEnvironments@2022-03-01' 
 resource extractorServer 'Microsoft.App/containerApps@2022-03-01' = {
   name: 'extractor-server'
   location: rgLocation
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: containerAppEnvironment.id
     configuration: {
       secrets: [
         {
-          name: 'secret1'
-          value: 'secret1'
+          name: 'container-registry-password'
+          value: acrClientSecret
         }
       ]
       ingress: {
@@ -105,6 +127,13 @@ resource extractorServer 'Microsoft.App/containerApps@2022-03-01' = {
           }
         ]
       }
+      registries: [
+        {
+          server: 'extractor.azurecr.io'
+          username: acrClientId
+          passwordSecretRef: 'container-registry-password'
+        }
+      ]
     }
     template: {
       containers: [
@@ -128,22 +157,26 @@ resource extractorServer 'Microsoft.App/containerApps@2022-03-01' = {
 resource extractor 'Microsoft.App/containerApps@2022-03-01' = {
   name: 'extractor'
   location: rgLocation
+  identity: {
+    type: 'SystemAssigned'
+   
+  }
   properties: {
     managedEnvironmentId: containerAppEnvironment.id
     configuration: {
       secrets: [
         {
-          name: 'secret1'
-          value: 'secret1'
+          name: 'container-registry-password'
+          value: acrClientSecret
         }
       ]
-      // registries: [
-      //   {
-      //     passwordSecretRef: 'registry-password'
-      //     server: dockerRegistryUrl
-      //     username: dockerRegistryUsername
-      //   }
-      // ]
+      registries: [
+        {
+          server: 'extractor.azurecr.io'
+          username: acrClientId
+          passwordSecretRef: 'container-registry-password'
+        }
+      ]
       ingress: {
         external: true
         targetPort: 5000
