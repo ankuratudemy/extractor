@@ -47,9 +47,49 @@ def extract_text():
     # for key, value in all_headers.items():
     #     print(f"{key}: {value}")
 
-    # # Access a specific header
-    # content_type_header = request.headers.get('Content-Type')
-    # print(f"\nContent-Type Header: {content_type_header}")
+    # Get values from request.form
+    lang_value = request.form.get('lang', '')
+    ocr_value = request.form.get('ocr', '')
+    out = request.form.get('out_format', '')
+    
+    # Define mapping for lang_value
+    lang_mapping = {
+        'hindi': 'hin',
+        # Add more mappings as needed
+    }
+
+    # Define mapping for lang_value
+    out_format_mapping = {
+        'text': 'text/plain',
+        'xml': 'application/xml',
+        'html': 'text/html',
+        'json': 'application/json',
+        # Add more mappings as needed
+    }
+
+    # Define default values
+    default_ocr_strategy = 'auto'
+    default_out_format = 'text/plain'
+
+    # Set values based on conditions
+    x_tika_ocr_language = lang_mapping.get(lang_value, '')
+    x_tika_pdf_ocr_strategy = 'no_ocr' if ocr_value.lower() == 'false' else ('ocr_only' if ocr_value.lower() == 'true' else default_ocr_strategy)
+    x_tika_accept = out_format_mapping.get(out, default_out_format)
+
+
+    # Now you can use these values in your headers
+    headers = {
+        'X-Tika-PDFOcrStrategy': x_tika_pdf_ocr_strategy,
+        'Accept': x_tika_accept
+    }
+
+    # Add 'X-Tika-OCRLanguage' header only if value is not empty
+    if x_tika_ocr_language:
+        headers['X-Tika-OCRLanguage'] = x_tika_ocr_language
+
+    # Access a specific header
+    content_type_header = request.headers.get('Content-Type')
+    print(f"\nContent-Type Header: {content_type_header}")
 
     contentType='application/pdf'
     uploaded_file = request.files['file']
@@ -116,7 +156,8 @@ def extract_text():
 
         if uploaded_file.content_type not in oFileExtMap:
             print('Invalid file extension')
-
+            return 'Unsupported file format.', 400
+        
         file_extension = oFileExtMap[ uploaded_file.content_type ]
         
         if file_extension == 'use_extension':
@@ -167,8 +208,11 @@ def extract_text():
         # num_cpus = multiprocessing.cpu_count()
         # log.info(num_cpus)
 
+        #Append Header value
+        headers['Content-Type'] = contentType
+
         loop = get_event_loop()
-        results = loop.run_until_complete(process_pages_async(pages, contentType))
+        results = loop.run_until_complete(process_pages_async(pages, headers))
 
         # Build the JSON output using mapped_results
         json_output = []
@@ -200,7 +244,6 @@ def convert_to_pdf(file_path, file_extension):
         command = [
             '/opt/libreoffice7.6/program/soffice',
             '--headless',
-            '--nodefault',
             '--convert-to',
             'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"17"}, "UseTaggedPDF": {"type":"boolean","value":"true"}}',
             '--outdir',
@@ -231,10 +274,9 @@ async def async_put_request(session, url, payload, page_num, headers):
     async with session.put(url, data=payload, headers=headers) as response:
         return await response.text(), page_num
 
-async def process_pages_async(pages, contentType):
+async def process_pages_async(pages, headers):
+    print(headers)
     url = SERVER_URL
-    headers = {'Accept': 'text/plain', 'Content-Type': contentType}
-
     async with aiohttp.ClientSession() as session:
         tasks = [async_put_request(session, url, page_data, page_num, headers) for page_num, page_data in pages]
         results = await asyncio.gather(*tasks)

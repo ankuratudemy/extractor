@@ -34,6 +34,7 @@ param acrClientId string
 @secure()
 param acrClientSecret string
 
+
 // @description('Name of the connected Container Registry')
 // param containerRegistryName string
 
@@ -47,6 +48,7 @@ param acrClientSecret string
 //     adminUserEnabled: true
 //   }
 // }
+
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
   name: vnetName
@@ -101,7 +103,7 @@ resource containerAppEnvironment 'Microsoft.App/managedEnvironments@2022-03-01' 
   }
 }
 
-resource extractorServer 'Microsoft.App/containerApps@2022-03-01' = {
+resource extractorServer 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'extractor-server'
   location: rgLocation
   identity: {
@@ -126,6 +128,9 @@ resource extractorServer 'Microsoft.App/containerApps@2022-03-01' = {
             weight: 100
           }
         ]
+        stickySessions: {
+          affinity:'none'
+        }
       }
       registries: [
         {
@@ -141,20 +146,57 @@ resource extractorServer 'Microsoft.App/containerApps@2022-03-01' = {
           name: 'extractor-server'
           image: '${extarctorServerContainerImage}:${extarctorServerContainerTag}'
           resources: {
-            cpu: '1.5'
-            memory: '3Gi'
+            cpu: '1'
+            memory: '2Gi'
           }
+          probes: [
+            {
+              failureThreshold: 2
+              httpGet: {
+                // host: 'string'
+                // httpHeaders: [
+                //   {
+                //     name: 'string'
+                //     value: 'string'
+                //   }
+                // ]
+                path: '/tika'
+                port: 9998
+                scheme: 'HTTP'
+              }
+              initialDelaySeconds: 2
+              periodSeconds: 30
+              successThreshold: 1
+              // tcpSocket: {
+              //   host: 'string'
+              //   port: int
+              // }
+              // terminationGracePeriodSeconds: 30 // fixed at 30 for now
+              timeoutSeconds: 2
+              type: 'Liveness'
+            }
+          ]
         }
       ]
       scale: {
-        maxReplicas: 63
-        minReplicas: 1
+        maxReplicas: 50
+        minReplicas: 0
+        rules: [
+          {
+            name: 'http-scale-rule'
+            http: {
+              metadata: {
+                concurrentRequests: '1'
+              }
+            }
+          }
+        ]
       }
     }
   }
 }
 
-resource extractor 'Microsoft.App/containerApps@2022-03-01' = {
+resource extractor 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'extractor'
   location: rgLocation
   identity: {
@@ -203,11 +245,48 @@ resource extractor 'Microsoft.App/containerApps@2022-03-01' = {
               value: extractorServer.name
             }
           ]
+          probes: [
+            {
+              failureThreshold: 2
+              httpGet: {
+                // host: 'string'
+                // httpHeaders: [
+                //   {
+                //     name: 'string'
+                //     value: 'string'
+                //   }
+                // ]
+                path: '/health'
+                port: 5000
+                scheme: 'HTTP'
+              }
+              initialDelaySeconds: 2
+              periodSeconds: 10
+              successThreshold: 1
+              // tcpSocket: {
+              //   host: 'string'
+              //   port: int
+              // }
+              // terminationGracePeriodSeconds: 30 // fixed at 30 for now
+              timeoutSeconds: 2
+              type: 'Liveness'
+            }
+          ]
         }
       ]
       scale: {
-        maxReplicas: 1
+        maxReplicas: 25
         minReplicas: 0
+        rules: [
+          {
+            name: 'http-scale-rule'
+            http: {
+              metadata: {
+                concurrentRequests: '1'
+              }
+            }
+          }
+        ]
       }
     }
   }
