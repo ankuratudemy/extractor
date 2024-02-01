@@ -1,6 +1,9 @@
 @description('Resource group location')
 param rgLocation string
 
+@description('Stage  uat/stage/prod')
+param stage string
+
 @description('VNET resource name')
 param vnetName string
 
@@ -51,7 +54,7 @@ param acrClientSecret string
 
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
-  name: vnetName
+  name: '${vnetName}-${stage}'
   location: rgLocation
   properties: {
     addressSpace: {
@@ -59,7 +62,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
     }
     subnets: [
       {
-        name: containerAppSubnetName
+        name: '${containerAppSubnetName}-${stage}'
         properties: {
           addressPrefix: subnetAddressPrefix
           serviceEndpoints: [
@@ -75,7 +78,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
 }
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2021-06-01' = {
-  name: cappLogAnalyticsName
+  name: '${cappLogAnalyticsName}-${stage}'
   location: rgLocation
   properties: {
     sku: { name: 'PerGB2018' }
@@ -84,7 +87,7 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2021-06-01' = {
 
 resource containerAppEnvironment 'Microsoft.App/managedEnvironments@2022-03-01' = {
   location: rgLocation
-  name: cappEnvName
+  name: '${cappEnvName}-${stage}'
   properties: {
     appLogsConfiguration: {
       destination: 'log-analytics'
@@ -104,7 +107,7 @@ resource containerAppEnvironment 'Microsoft.App/managedEnvironments@2022-03-01' 
 }
 
 resource extractorServer 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'extractor-server'
+  name: 'xtract-be-${stage}'
   location: rgLocation
   identity: {
     type: 'SystemAssigned'
@@ -134,7 +137,7 @@ resource extractorServer 'Microsoft.App/containerApps@2023-05-01' = {
       }
       registries: [
         {
-          server: 'extractor.azurecr.io'
+          server: 'structhubregistry.azurecr.io'
           username: acrClientId
           passwordSecretRef: 'container-registry-password'
         }
@@ -143,7 +146,7 @@ resource extractorServer 'Microsoft.App/containerApps@2023-05-01' = {
     template: {
       containers: [
         {
-          name: 'extractor-server'
+          name: 'xtract-be-${stage}'
           image: '${extarctorServerContainerImage}:${extarctorServerContainerTag}'
           resources: {
             cpu: '1'
@@ -197,7 +200,7 @@ resource extractorServer 'Microsoft.App/containerApps@2023-05-01' = {
 }
 
 resource extractor 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'extractor'
+  name: 'xtract-fe-${stage}'
   location: rgLocation
   identity: {
     type: 'SystemAssigned'
@@ -214,7 +217,7 @@ resource extractor 'Microsoft.App/containerApps@2023-05-01' = {
       ]
       registries: [
         {
-          server: 'extractor.azurecr.io'
+          server: 'structhubregistry.azurecr.io'
           username: acrClientId
           passwordSecretRef: 'container-registry-password'
         }
@@ -233,7 +236,7 @@ resource extractor 'Microsoft.App/containerApps@2023-05-01' = {
     template: {
       containers: [
         {
-          name: 'extractor'
+          name: 'xtract-fe-${stage}'
           image: '${extractorContainerImage}:${extractorContainerTag}'
           resources: {
             cpu: '2'
@@ -292,6 +295,6 @@ resource extractor 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
-output vnetName string = vnetName
+output vnetName string = '${vnetName}-${stage}'
 output location string = rgLocation
-output cappEnvName string = cappEnvName
+output cappEnvName string = '${cappEnvName}-${stage}'
