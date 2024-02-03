@@ -22,10 +22,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # Create a new directory called "uploads"
 RUN mkdir /app/uploads
-RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
-RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
 
-RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
+#RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+#RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+
+#RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
 
 RUN rm -Rf /usr/share/fonts/*
 RUN ls -ltr /usr/share/fonts
@@ -37,13 +38,12 @@ RUN fc-list
 # RUN wget -O find_uno.py --no-check-certificate https://gist.githubusercontent.com/regebro/036da022dc7d5241a0ee97efdf1458eb/raw/find_uno.py
 # RUN python3 find_uno.py
 COPY ./shared /app/shared
-
+COPY ./SAKeys/fe-key.json key.json
 # Copy the application code to the container
 COPY app.py .
 
 # Expose port 5000 for the Flask application
 EXPOSE 5000
 
-
 # Run app.py when the container launches
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000","--timeout", "300", "app:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000","--timeout", "180", "app:app"]

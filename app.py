@@ -2,7 +2,7 @@ import os
 import io
 from flask import Flask, request
 from werkzeug.utils import secure_filename
-from shared import file_processor
+from shared import file_processor, google_auth
 import json
 import concurrent.futures
 import multiprocessing
@@ -21,8 +21,13 @@ app = Flask(__name__)
 
 UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
+SERVER_URL = f"https://{os.environ.get('SERVER_URL')}/tika"
+# Replace the following with your actual values
 
-SERVER_URL = f"http://{os.environ.get('SERVER_URL')}/tika"
+# Create the ID token
+bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
+
+
 # TIKA_FUNCTION = "http://host.docker.internal:9998/tika"
 
 def get_event_loop():
@@ -210,6 +215,7 @@ def extract_text():
 
         #Append Header value
         headers['Content-Type'] = contentType
+        headers['Authorization'] = f'Bearer {bearer_token}'
 
         loop = get_event_loop()
         results = loop.run_until_complete(process_pages_async(pages, headers))

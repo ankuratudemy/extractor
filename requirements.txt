@@ -10,3 +10,6 @@ pandas
 openpyxl
 pyexcel 
 pyexcel-ods
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
