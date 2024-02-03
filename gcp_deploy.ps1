@@ -2,10 +2,10 @@ $REGIONS = @("us-central1", "us-east4")
 
 $FE_MAX_INST="25"
 $FE_MIN_INST="0"
-$FE_CPU="2"
-$FE_MEMORY="4Gi"
+$FE_CPU="1"
+$FE_MEMORY="2Gi"
 $FE_PORT="5000"
-$BE_MAX_INST="50"
+$BE_MAX_INST="75"
 $BE_MIN_INST="0"
 $BE_CPU="1"
 $BE_MEMORY="2Gi"
@@ -15,7 +15,7 @@ $ExternalIpAddressNameBE = "xtract-be-ip-name"
 $STRUCTHUB_DOMAIN_FE="stage.api.structhub.io"
 $STRUCTHUB_DOMAIN_BE="stage-be.api.structhub.io"
 $BE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:5.0.0"
+$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:6.0.0"
 $BE_CONCURRENT_REQUESTS_PER_INST=1
 $FE_CONCURRENT_REQUESTS_PER_INST=1
 gcloud config set project $PROJECT_ID
