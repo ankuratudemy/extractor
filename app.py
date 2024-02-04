@@ -1,8 +1,9 @@
 import os
 import io
-from flask import Flask, request
+from flask import Flask, request, make_response, render_template, jsonify
+from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
-from shared import file_processor, google_auth
+from shared import file_processor, google_auth, security
 import json
 import concurrent.futures
 import multiprocessing
@@ -16,19 +17,40 @@ import threading
 
 sys.path.append('../')
 from shared.logging_config import log
-
 app = Flask(__name__)
+app.debug=True
 
+# Assuming you have Redis connection details
+REDIS_HOST = os.environ.get('REDIS_HOST')
+REDIS_PORT = os.environ.get('REDIS_PORT')
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
+SECRET_KEY = os.environ.get('SECRET_KEY')
+
+
+def default_error_responder(request_limit: RequestLimit):
+    return jsonify({"error": "rate_limit_exceeded"}), 429
+
+limiter = Limiter(
+        key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        app=app,
+        storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
+        storage_options={"socket_connect_timeout": 30},
+        strategy="fixed-window",  # or "moving-window"
+        on_breach=default_error_responder
+    )
 UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 SERVER_URL = f"https://{os.environ.get('SERVER_URL')}/tika"
-# Replace the following with your actual values
+
+
+# Validate API-KEY
+@app.before_request
+def before_request():
+    security.api_key_required()
+
 
 # Create the ID token
 bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
-
-
-# TIKA_FUNCTION = "http://host.docker.internal:9998/tika"
 
 def get_event_loop():
     try:
@@ -38,21 +60,13 @@ def get_event_loop():
         asyncio.set_event_loop(loop)
     return loop
 
-@app.route('/health', methods=['GET'])
+@app.route('/health', methods=['GET'], endpoint='health_check')
 def health_check():
     return json.dumps({"status": "ok"})
 
 @app.route('/extract', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None))
 def extract_text():
-    # # Access headers
-    # all_headers = request.headers
-
-    # # Print all headers
-    # print("All Headers:")
-    # for key, value in all_headers.items():
-    #     print(f"{key}: {value}")
-
-    # Get values from request.form
     lang_value = request.form.get('lang', '')
     ocr_value = request.form.get('ocr', '')
     out = request.form.get('out_format', '')

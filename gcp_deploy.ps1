@@ -1,4 +1,4 @@
-$REGIONS = @("us-central1", "us-east4")
+$REGIONS = @("us-central1", "us-east4", "us-east1","us-east5", "us-west1","us-west2", "asia-south1","asia-south2","europe-west2","europe-west3","northamerica-northeast1","northamerica-northeast2")
 
 $FE_MAX_INST="25"
 $FE_MIN_INST="0"
@@ -24,6 +24,8 @@ gcloud services enable run.googleapis.com compute.googleapis.com
 # Set service names as variables
 $FE_SERVICE_NAME_PREFIX = "xtract-fe"
 $BE_SERVICE_NAME_PREFIX = "xtract-be"
+$FE_HC_PATH = "/health"
+$BE_HC_PATH = "/tika"
 
 # Function to deploy Cloud Run service
 Function Deploy-CloudRunService {
@@ -37,8 +39,18 @@ Function Deploy-CloudRunService {
         [string]$max,
         [string]$min,
         [string]$customDomainAudience,
-        [string]$concurrency
+        [string]$concurrency,
+        [string]$healthCheckPath
     )
+
+    $healthCheckName = "http-health-check-$serviceName"
+
+    # Create health check
+    gcloud compute health-checks update http $healthCheckName `
+        --request-path=$healthCheckPath `
+        --check-interval=30s `
+        --unhealthy-threshold=1 `
+        --port=$port
 
     gcloud run deploy $serviceName-$region `
         --region $region `
@@ -51,15 +63,17 @@ Function Deploy-CloudRunService {
         --memory $memory `
         --port $port `
         --add-custom-audiences $customDomainAudience `
-        --concurrency $concurrency 
+        --concurrency $concurrency `
+        --ingress "internal-and-cloud-load-balancing"
+
     $serviceURI = (gcloud run services describe $serviceName-$region --region $region --format 'value(status.url)')
     New-Variable -Name "$serviceName`_$region_URI" -Value $serviceURI -Force
 }
 
 # Deploy xtract-fe and xtract-be services in each region
 foreach ($region in $REGIONS) {
-    Deploy-CloudRunService -serviceName $FE_SERVICE_NAME_PREFIX -region $region -image $FE_IMAGE -cpu $FE_CPU -memory $FE_MEMORY -port $FE_PORT -max $FE_MAX_INST -min $FE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_FE -concurrency $FE_CONCURRENT_REQUESTS_PER_INST
-    Deploy-CloudRunService -serviceName $BE_SERVICE_NAME_PREFIX -region $region -image $BE_IMAGE -cpu $BE_CPU -memory $BE_MEMORY -port $BE_PORT -max $BE_MAX_INST -min $BE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_BE -concurrency $BE_CONCURRENT_REQUESTS_PER_INST
+    Deploy-CloudRunService -serviceName $FE_SERVICE_NAME_PREFIX -region $region -image $FE_IMAGE -cpu $FE_CPU -memory $FE_MEMORY -port $FE_PORT -max $FE_MAX_INST -min $FE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_FE -concurrency $FE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $FE_HC_PATH
+    Deploy-CloudRunService -serviceName $BE_SERVICE_NAME_PREFIX -region $region -image $BE_IMAGE -cpu $BE_CPU -memory $BE_MEMORY -port $BE_PORT -max $BE_MAX_INST -min $BE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_BE -concurrency $BE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $BE_HC_PATH
 }
 
 # Create global external IP addresses for Cloud Run
@@ -76,8 +90,8 @@ foreach ($region in $REGIONS) {
 }
 
 # Create global backend services for Cloud Run
-gcloud compute backend-services create $FE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global
-gcloud compute backend-services create $BE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global
+gcloud compute backend-services update $FE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$FE_SERVICE_NAME_PREFIX"
+gcloud compute backend-services update $BE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$BE_SERVICE_NAME_PREFIX"
 
 # Iterate through each region and add Cloud Run Network Endpoint Group to global backend service
 foreach ($region in $REGIONS) {

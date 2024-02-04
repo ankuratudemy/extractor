@@ -9,10 +9,10 @@ import json
 import hashlib
 
 # Assuming you have a Redis connection details
-REDIS_HOST = 'redis-15309.c280.us-central1-2.gce.cloud.redislabs.com'
-REDIS_PORT = 15309
-REDIS_PASSWORD = 'psc7TLz0Mzf24RUNrN9Dzv4LJ32CnQIV'
-SECRET_KEY = 'fdsfsdfdsgsfdgsfdvsfdgsfdsfds324324'
+REDIS_HOST = os.environ.get('REDIS_HOST')
+REDIS_PORT = os.environ.get('REDIS_PORT')
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 def create_api_key(tenant_id, key_data):
     encoded_key = encode_api_key(key_data)
@@ -27,9 +27,6 @@ def validate_api_key(api_key):
         abort(401, "Invalid API Key")
 
     tenant_data = decode_api_key(api_key)
-    print(tenant_data)
-    print(tenant_id)
-    print(tenant_data.get('rate_limit'))
     return tenant_data
 
 def encode_api_key(key_data):
@@ -59,7 +56,3 @@ def api_key_required():
     tenant_data = validate_api_key(api_key)
     request.tenant_data = tenant_data
     return None
-
-
-create_api_key("structhubadmin1", {"tenant_id": "structhubadmin1", "rate_limit": "2/minute"})
-#validate_api_key("eyJ0ZW5hbnRfaWQiOiAic3RydWN0aHViYWRtaW4iLCAicmF0ZV9saW1pdCI6ICIyIHBlciBtaW51dGUifQ==.3a9b5f6046ff3dde183f2159057e56285cc220da5a0da6d24e242d6ab3ea61bb")
