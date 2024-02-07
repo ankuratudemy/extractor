@@ -1,11 +1,11 @@
 $REGIONS = @("us-central1", "us-east4", "us-east1","us-east5", "us-west1","us-west2", "asia-south1","asia-south2","europe-west2","europe-west3","northamerica-northeast1","northamerica-northeast2")
 
-$FE_MAX_INST="25"
+$FE_MAX_INST="40"
 $FE_MIN_INST="0"
 $FE_CPU="1"
 $FE_MEMORY="2Gi"
 $FE_PORT="5000"
-$BE_MAX_INST="75"
+$BE_MAX_INST="60"
 $BE_MIN_INST="0"
 $BE_CPU="1"
 $BE_MEMORY="2Gi"
@@ -15,10 +15,10 @@ $ExternalIpAddressNameBE = "xtract-be-ip-name"
 $STRUCTHUB_DOMAIN_FE="stage.api.structhub.io"
 $STRUCTHUB_DOMAIN_BE="stage-be.api.structhub.io"
 $BE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:6.0.0"
+$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:8.0.0"
 $BE_CONCURRENT_REQUESTS_PER_INST=1
 $FE_CONCURRENT_REQUESTS_PER_INST=1
-$PROJECT_ID = "your-project-id"  # Replace with your actual project ID
+$PROJECT_ID = "structhub-412620"  # Replace with your actual project ID
 
 # Set service names as variables
 $FE_SERVICE_NAME_PREFIX = "xtract-fe"
@@ -46,6 +46,10 @@ Function Deploy-CloudRunService {
         --no-allow-unauthenticated `
         --image $image `
         --set-env-vars SERVER_URL=$STRUCTHUB_DOMAIN_BE `
+        --set-env-vars SERVER_URL=$REDIS_HOST `
+        --set-env-vars SERVER_URL=$REDIS_PASSWORD `
+        --set-env-vars SERVER_URL=$SECRET_KEY `
+        --set-env-vars SERVER_URL=$REDIS_PORT `
         --cpu $cpu `
         --memory $memory `
         --port $port `

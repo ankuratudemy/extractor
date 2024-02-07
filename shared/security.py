@@ -26,6 +26,7 @@ def validate_api_key(api_key):
     if tenant_id is None:
         abort(401, "Invalid API Key")
 
+    redis_conn.close()
     tenant_data = decode_api_key(api_key)
     return tenant_data
 

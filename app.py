@@ -28,14 +28,14 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 
 
 def default_error_responder(request_limit: RequestLimit):
-    return jsonify({"error": "rate_limit_exceeded"}), 429
+    return f'No file uploaded: {request_limit}', 429
 
 limiter = Limiter(
         key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
         app=app,
         storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
         storage_options={"socket_connect_timeout": 30},
-        strategy="fixed-window",  # or "moving-window"
+        strategy="moving-window",  # or "moving-window"
         on_breach=default_error_responder
     )
 UPLOADS_FOLDER = '/app/uploads'

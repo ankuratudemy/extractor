@@ -1,11 +1,17 @@
-$REGIONS = @("us-central1", "us-east4", "us-east1","us-east5", "us-west1","us-west2", "asia-south1","asia-south2","europe-west2","europe-west3","northamerica-northeast1","northamerica-northeast2")
+param (
+    [string]$REDIS_HOST,
+    [string]$REDIS_PASSWORD,
+    [string]$SECRET_KEY,
+    [string]$REDIS_PORT
+)
+$REGIONS = @("northamerica-northeast1","northamerica-northeast2","us-central1", "us-east4", "us-east1","us-east5", "us-west1","us-west2", "asia-south1","asia-south2","europe-west2","europe-west3")
 
-$FE_MAX_INST="25"
+$FE_MAX_INST="40"
 $FE_MIN_INST="0"
 $FE_CPU="1"
 $FE_MEMORY="2Gi"
 $FE_PORT="5000"
-$BE_MAX_INST="75"
+$BE_MAX_INST="60"
 $BE_MIN_INST="0"
 $BE_CPU="1"
 $BE_MEMORY="2Gi"
@@ -15,11 +21,12 @@ $ExternalIpAddressNameBE = "xtract-be-ip-name"
 $STRUCTHUB_DOMAIN_FE="stage.api.structhub.io"
 $STRUCTHUB_DOMAIN_BE="stage-be.api.structhub.io"
 $BE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:6.0.0"
+$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-11.0.0"
 $BE_CONCURRENT_REQUESTS_PER_INST=1
 $FE_CONCURRENT_REQUESTS_PER_INST=1
+$PROJECT_ID="structhub-412620"
 gcloud config set project $PROJECT_ID
-gcloud services enable run.googleapis.com compute.googleapis.com
+# gcloud services enable run.googleapis.com compute.googleapis.com
 
 # Set service names as variables
 $FE_SERVICE_NAME_PREFIX = "xtract-fe"
@@ -43,6 +50,12 @@ Function Deploy-CloudRunService {
         [string]$healthCheckPath
     )
 
+
+    # Now you can use the parameters in your script
+    Write-Host "REDIS_HOST: $REDIS_HOST"
+    Write-Host "REDIS_PASSWORD: $REDIS_PASSWORD"
+    Write-Host "SECRET_KEY: $SECRET_KEY"
+    Write-Host "REDIS_PORT: $REDIS_PORT"
     $healthCheckName = "http-health-check-$serviceName"
 
     # Create health check
@@ -52,19 +65,46 @@ Function Deploy-CloudRunService {
         --unhealthy-threshold=1 `
         --port=$port
 
-    gcloud run deploy $serviceName-$region `
-        --region $region `
-        --max-instances $max `
-        --min-instances $min `
-        --no-allow-unauthenticated `
-        --image $image `
-        --set-env-vars SERVER_URL=$STRUCTHUB_DOMAIN_BE `
-        --cpu $cpu `
-        --memory $memory `
-        --port $port `
-        --add-custom-audiences $customDomainAudience `
-        --concurrency $concurrency `
-        --ingress "internal-and-cloud-load-balancing"
+    if ($serviceName -eq $FE_SERVICE_NAME_PREFIX) {
+        # For frontend service, allow unauthenticated access
+        gcloud run deploy $serviceName-$region `
+            --region $region `
+            --max-instances $max `
+            --min-instances $min `
+            --allow-unauthenticated `
+            --image $image `
+            --set-env-vars SERVER_URL=$STRUCTHUB_DOMAIN_BE `
+            --set-env-vars REDIS_HOST=$REDIS_HOST `
+            --set-env-vars REDIS_PASSWORD=$REDIS_PASSWORD `
+            --set-env-vars SECRET_KEY=$SECRET_KEY `
+            --set-env-vars REDIS_PORT=$REDIS_PORT `
+            --cpu $cpu `
+            --memory $memory `
+            --port $port `
+            --add-custom-audiences $customDomainAudience `
+            --concurrency $concurrency `
+            --ingress "internal-and-cloud-load-balancing"
+            #--timeout=1m80s
+    } else {
+        # For backend service, do not allow unauthenticated access
+        gcloud run deploy $serviceName-$region `
+            --region $region `
+            --max-instances $max `
+            --min-instances $min `
+            --no-allow-unauthenticated `
+            --image $image `
+            --set-env-vars SERVER_URL=$STRUCTHUB_DOMAIN_BE `
+            --set-env-vars REDIS_HOST=$REDIS_HOST `
+            --set-env-vars REDIS_PASSWORD=$REDIS_PASSWORD `
+            --set-env-vars SECRET_KEY=$SECRET_KEY `
+            --set-env-vars REDIS_PORT=$REDIS_PORT `
+            --cpu $cpu `
+            --memory $memory `
+            --port $port `
+            --add-custom-audiences $customDomainAudience `
+            --concurrency $concurrency `
+            --ingress "internal-and-cloud-load-balancing"
+    }
 
     $serviceURI = (gcloud run services describe $serviceName-$region --region $region --format 'value(status.url)')
     New-Variable -Name "$serviceName`_$region_URI" -Value $serviceURI -Force
@@ -90,8 +130,8 @@ foreach ($region in $REGIONS) {
 }
 
 # Create global backend services for Cloud Run
-gcloud compute backend-services update $FE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$FE_SERVICE_NAME_PREFIX"
-gcloud compute backend-services update $BE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$BE_SERVICE_NAME_PREFIX"
+gcloud compute backend-services create $FE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$FE_SERVICE_NAME_PREFIX"
+gcloud compute backend-services create $BE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$BE_SERVICE_NAME_PREFIX"
 
 # Iterate through each region and add Cloud Run Network Endpoint Group to global backend service
 foreach ($region in $REGIONS) {
@@ -99,7 +139,7 @@ foreach ($region in $REGIONS) {
     $networkEndpointGroupNameBE = "neg-$BE_SERVICE_NAME_PREFIX-$region"
 
     gcloud compute backend-services add-backend $FE_SERVICE_NAME_PREFIX-backend --global --network-endpoint-group=$networkEndpointGroupNameFE --network-endpoint-group-region=$region
-    gcloud compute backend-services add-backend $BE_SERVICE_NAME_PREFIX-backend --global --network-endpoint-group=$networkEndpointGroupNameBE --network-endpoint-group-region=$region
+    gcloud compute backend-services add-backend $BE_SERVICE_NAME_PREFIX-backend --global --network-endpoint-group=$networkEndpointGroupNameBE --network-endpoint-group-region=$region 
 }
 
 # Create URL maps for Cloud Run services

@@ -61,5 +61,5 @@ def api_key_required():
     return None
 
 
-create_api_key("structhubadmin1", {"tenant_id": "structhubadmin1", "rate_limit": "2/minute"})
+create_api_key("structhubadmin2", {"tenant_id": "structhubadmin1", "rate_limit": "20/minute"})
 #validate_api_key("eyJ0ZW5hbnRfaWQiOiAic3RydWN0aHViYWRtaW4iLCAicmF0ZV9saW1pdCI6ICIyIHBlciBtaW51dGUifQ==.3a9b5f6046ff3dde183f2159057e56285cc220da5a0da6d24e242d6ab3ea61bb")
