@@ -4,8 +4,8 @@ import { sleep } from 'k6';
 
 
 export let options = {
-  vus: 100, // number of virtual users
-  duration: '10m', // test duration
+  vus: 10, // number of virtual users
+  duration: '5m', // test duration
 };
 
 const binFile = open('/C:/Users/ankur/Downloads/tmp_file.docx', 'b');
@@ -13,7 +13,7 @@ const binFile = open('/C:/Users/ankur/Downloads/tmp_file.docx', 'b');
 
 export default function () {
   const params = {
-     timeout: '6000s'
+     timeout: 6000000
   };
 
     const data = {
@@ -22,7 +22,7 @@ export default function () {
 
   let headers = {
     'Accept': 'text/plain',
-    'API-KEY': 'eyJ0ZW5hbnRfaWQiOiAic3RydWN0aHViYWRtaW4xIiwgInJhdGVfbGltaXQiOiAiMjAvbWludXRlIn0=.c083eba28285fed449eb159494faaa2e2e9714bbfbb053ee4abc8d0966fe9319', // Replace with your actual access token
+    'API-KEY': 'eyJ0ZW5hbnRfaWQiOiAic3RydWN0aHViYWRtaW4xIiwgInJhdGVfbGltaXQiOiAiMjAwMDAwMC9taW51dGUifQ==.7004df1440115c49bc34c5b13a11362b70d6927fa0e94d59af5cc01f5cf66342', // Replace with your actual access token
   };
 
   let res = http.post('https://stage.api.structhub.io/extract', data, { headers: headers }, params);

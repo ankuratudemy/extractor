@@ -21,7 +21,7 @@ $ExternalIpAddressNameBE = "xtract-be-ip-name"
 $STRUCTHUB_DOMAIN_FE="stage.api.structhub.io"
 $STRUCTHUB_DOMAIN_BE="stage-be.api.structhub.io"
 $BE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-11.0.0"
+$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-34.0.0"
 $BE_CONCURRENT_REQUESTS_PER_INST=1
 $FE_CONCURRENT_REQUESTS_PER_INST=1
 $PROJECT_ID="structhub-412620"
@@ -83,8 +83,8 @@ Function Deploy-CloudRunService {
             --port $port `
             --add-custom-audiences $customDomainAudience `
             --concurrency $concurrency `
-            --ingress "internal-and-cloud-load-balancing"
-            #--timeout=1m80s
+            --ingress "internal-and-cloud-load-balancing" `
+            --timeout="5m"
     } else {
         # For backend service, do not allow unauthenticated access
         gcloud run deploy $serviceName-$region `
@@ -103,7 +103,8 @@ Function Deploy-CloudRunService {
             --port $port `
             --add-custom-audiences $customDomainAudience `
             --concurrency $concurrency `
-            --ingress "internal-and-cloud-load-balancing"
+            --ingress "internal-and-cloud-load-balancing" `
+            --timeout="110s"
     }
 
     $serviceURI = (gcloud run services describe $serviceName-$region --region $region --format 'value(status.url)')
@@ -130,8 +131,8 @@ foreach ($region in $REGIONS) {
 }
 
 # Create global backend services for Cloud Run
-gcloud compute backend-services create $FE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$FE_SERVICE_NAME_PREFIX"
-gcloud compute backend-services create $BE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$BE_SERVICE_NAME_PREFIX"
+gcloud compute backend-services create $FE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$FE_SERVICE_NAME_PREFIX" --connection-draining-timeout=310 --locality-lb-policy="RANDOM"
+gcloud compute backend-services create $BE_SERVICE_NAME_PREFIX-backend --load-balancing-scheme=EXTERNAL_MANAGED --global --http-health-checks="http-health-check-$BE_SERVICE_NAME_PREFIX" --connection-draining-timeout=70 --locality-lb-policy="RANDOM"
 
 # Iterate through each region and add Cloud Run Network Endpoint Group to global backend service
 foreach ($region in $REGIONS) {
@@ -155,8 +156,8 @@ gcloud compute ssl-certificates create $FE_SERVICE_NAME_PREFIX-structhub-cert --
 gcloud compute ssl-certificates create $BE_SERVICE_NAME_PREFIX-structhub-cert --domains "$STRUCTHUB_DOMAIN_BE"
 
 # Create target HTTPS proxies for Cloud Run services
-gcloud compute target-https-proxies create external-$FE_SERVICE_NAME_PREFIX-https --ssl-certificates=$FE_SERVICE_NAME_PREFIX-structhub-cert --url-map=external-$FE_SERVICE_NAME_PREFIX
-gcloud compute target-https-proxies create external-$BE_SERVICE_NAME_PREFIX-https --ssl-certificates=$BE_SERVICE_NAME_PREFIX-structhub-cert --url-map=external-$BE_SERVICE_NAME_PREFIX
+gcloud compute target-https-proxies create external-$FE_SERVICE_NAME_PREFIX-https --ssl-certificates=$FE_SERVICE_NAME_PREFIX-structhub-cert --url-map=external-$FE_SERVICE_NAME_PREFIX --http-keep-alive-timeout-sec=610
+gcloud compute target-https-proxies create external-$BE_SERVICE_NAME_PREFIX-https --ssl-certificates=$BE_SERVICE_NAME_PREFIX-structhub-cert --url-map=external-$BE_SERVICE_NAME_PREFIX --http-keep-alive-timeout-sec=610
 
 # Create forwarding rules for Cloud Run services
 gcloud compute forwarding-rules create $FE_SERVICE_NAME_PREFIX-https --load-balancing-scheme=EXTERNAL_MANAGED --network-tier=PREMIUM --address=$ExternalIpAddressNameFE --target-https-proxy=external-$FE_SERVICE_NAME_PREFIX-https --global --ports=443

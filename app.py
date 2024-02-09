@@ -1,6 +1,7 @@
 import os
 import io
 from flask import Flask, request, make_response, render_template, jsonify
+from flask_httpauth import HTTPTokenAuth
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
 from shared import file_processor, google_auth, security
@@ -14,10 +15,12 @@ import requests
 import aiohttp
 import asyncio
 import threading
+import ssl
 
 sys.path.append('../')
 from shared.logging_config import log
 app = Flask(__name__)
+auth = HTTPTokenAuth(header="API-KEY")
 app.debug=True
 
 # Assuming you have Redis connection details
@@ -26,9 +29,12 @@ REDIS_PORT = os.environ.get('REDIS_PORT')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
+@auth.verify_token
+def verify_token(token):
+    return security.api_key_required(token)
 
 def default_error_responder(request_limit: RequestLimit):
-    return f'No file uploaded: {request_limit}', 429
+    return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429
 
 limiter = Limiter(
         key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
@@ -38,15 +44,10 @@ limiter = Limiter(
         strategy="moving-window",  # or "moving-window"
         on_breach=default_error_responder
     )
+
 UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 SERVER_URL = f"https://{os.environ.get('SERVER_URL')}/tika"
-
-
-# Validate API-KEY
-@app.before_request
-def before_request():
-    security.api_key_required()
 
 
 # Create the ID token
@@ -65,7 +66,8 @@ def health_check():
     return json.dumps({"status": "ok"})
 
 @app.route('/extract', methods=['POST'])
-@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None))
+@auth.login_required
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def extract_text():
     lang_value = request.form.get('lang', '')
     ocr_value = request.form.get('ocr', '')
@@ -290,10 +292,6 @@ def convert_to_pdf(file_path, file_extension):
         log.error(f'Error during PDF conversion: {str(e)}')
         return None
 
-async def async_put_request(session, url, payload, page_num, headers):
-    async with session.put(url, data=payload, headers=headers) as response:
-        return await response.text(), page_num
-
 async def process_pages_async(pages, headers):
     print(headers)
     url = SERVER_URL
@@ -305,6 +303,34 @@ async def process_pages_async(pages, headers):
     mapped_results = [(result, page_num) for (result, page_num) in results]
 
     return mapped_results
+
+async def async_put_request(session, url, payload, page_num, headers, max_retries=10):
+    retries = 0
+
+    while retries < max_retries:
+        try:
+            # Create a new BytesIO object for each request
+            payload_copy = io.BytesIO(payload.getvalue())
+            async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=110)) as response:
+                if response.status == 429:
+                    print(f"Retrying request for page {page_num}, Retry #{retries + 1}")
+                    retries += 1
+                    await asyncio.sleep(1)  # You may adjust the sleep duration
+                    continue  # Retry the request
+                return await response.text(), page_num
+
+        except aiohttp.ClientError as e:
+            print(f"Error during request for page {page_num}: {str(e)}")
+            retries += 1
+            await asyncio.sleep(1)  # You may adjust the sleep duration
+
+        except ssl.SSLError as e:
+            print(f"SSL Error during request for page {page_num}: {str(e)}")
+            retries += 1
+            await asyncio.sleep(1)  # You may adjust the sleep duration
+
+    # If retries are exhausted, raise an exception or handle it as needed
+    raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
