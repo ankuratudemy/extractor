@@ -21,7 +21,7 @@ $ExternalIpAddressNameBE = "xtract-be-ip-name"
 $STRUCTHUB_DOMAIN_FE="stage.api.structhub.io"
 $STRUCTHUB_DOMAIN_BE="stage-be.api.structhub.io"
 $BE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-34.0.0"
+$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-36.0.0"
 $BE_CONCURRENT_REQUESTS_PER_INST=1
 $FE_CONCURRENT_REQUESTS_PER_INST=1
 $PROJECT_ID="structhub-412620"
@@ -84,7 +84,7 @@ Function Deploy-CloudRunService {
             --add-custom-audiences $customDomainAudience `
             --concurrency $concurrency `
             --ingress "internal-and-cloud-load-balancing" `
-            --timeout="5m"
+            --timeout=690
     } else {
         # For backend service, do not allow unauthenticated access
         gcloud run deploy $serviceName-$region `

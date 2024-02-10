@@ -309,9 +309,8 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
 
     while retries < max_retries:
         try:
-            # Create a new BytesIO object for each request
             payload_copy = io.BytesIO(payload.getvalue())
-            async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=110)) as response:
+            async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=300)) as response:
                 if response.status == 429:
                     print(f"Retrying request for page {page_num}, Retry #{retries + 1}")
                     retries += 1
@@ -329,8 +328,14 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
             retries += 1
             await asyncio.sleep(1)  # You may adjust the sleep duration
 
+        except asyncio.TimeoutError:
+            print(f"Timeout error during request for page {page_num}. Retrying...")
+            retries += 1
+            await asyncio.sleep(1)  # Adjust the sleep duration
+
     # If retries are exhausted, raise an exception or handle it as needed
     raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

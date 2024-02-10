@@ -4,7 +4,7 @@ import { sleep } from 'k6';
 
 
 export let options = {
-  vus: 10, // number of virtual users
+  vus: 10,// number of virtual users
   duration: '5m', // test duration
 };
 
@@ -13,7 +13,7 @@ const binFile = open('/C:/Users/ankur/Downloads/tmp_file.docx', 'b');
 
 export default function () {
   const params = {
-     timeout: 6000000
+     timeout: "600s"
   };
 
     const data = {
@@ -26,7 +26,7 @@ export default function () {
   };
 
   let res = http.post('https://stage.api.structhub.io/extract', data, { headers: headers }, params);
-  console.log(res.status)
+  console.log(JSON.stringify(res))
   check(res, {
     'status is 200': (r) => r.status === 200,
   });
