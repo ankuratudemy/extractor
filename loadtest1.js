@@ -8,7 +8,7 @@ export let options = {
   duration: '5m', // test duration
 };
 
-const binFile = open('/C:/Users/ankur/Downloads/tmp_file.docx', 'b');
+const binFile = open('/C:/Users/ankur/Downloads/Format of NOC From Registered Office Owner.docx', 'b');
 
 
 export default function () {
@@ -26,7 +26,6 @@ export default function () {
   };
 
   let res = http.post('https://stage.api.structhub.io/extract', data, { headers: headers }, params);
-  console.log(JSON.stringify(res))
   check(res, {
     'status is 200': (r) => r.status === 200,
   });

@@ -195,14 +195,13 @@ def extract_text():
             start_time = time.time()
             pages = file_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
-            log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
+            # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
         
         elif file_extension in ['csv', 'xls', 'xltm', 'xltx', 'xlsx', 'tsv', 'ots']:
             pages = file_processor.split_excel(uploaded_file.read())
             contentType = reverse_file_ext_map.get(file_extension, '')
 
         elif file_extension in ['ods']:
-            print("here")
             pages = file_processor.split_ods(uploaded_file.read())
             print(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
@@ -217,7 +216,7 @@ def extract_text():
                 start_time = time.time()
                 pages = file_processor.split_pdf(pdf_data)
                 split_time = time.time() - start_time
-                log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
+                # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
             else:
                 log.error('Conversion to PDF failed')
                 return 'Conversion to PDF failed.', 400
@@ -283,7 +282,7 @@ def convert_to_pdf(file_path, file_extension):
 
             return pdf_data
         else:
-            log.error('Conversion to PDF failed: Output file not found')
+            # log.error('Conversion to PDF failed: Output file not found')
             return None
     except subprocess.CalledProcessError as e:
         log.error(f'Conversion to PDF failed: {str(e)}')
@@ -293,7 +292,6 @@ def convert_to_pdf(file_path, file_extension):
         return None
 
 async def process_pages_async(pages, headers):
-    print(headers)
     url = SERVER_URL
     async with aiohttp.ClientSession() as session:
         tasks = [async_put_request(session, url, page_data, page_num, headers) for page_num, page_data in pages]
