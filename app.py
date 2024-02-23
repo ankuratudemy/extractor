@@ -5,6 +5,7 @@ from flask_httpauth import HTTPTokenAuth
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
 from shared import file_processor, google_auth, security
+from types import FrameType
 import json
 import concurrent.futures
 import multiprocessing
@@ -16,6 +17,7 @@ import aiohttp
 import asyncio
 import threading
 import ssl
+import signal
 
 sys.path.append('../')
 from shared.logging_config import log
@@ -29,17 +31,15 @@ REDIS_PORT = os.environ.get('REDIS_PORT')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
-@app.errorhandler(401)
-def custom_401(error):
-    return jsonify({"message": 'Invalid API-KEY'}), 401
+def verify_api_key():
+    api_key_header = request.headers.get('API-KEY')
+    return security.api_key_required(api_key_header)
 
-@auth.verify_token
-def verify_token(token):
-    is_valid = security.api_key_required(token)
-    if not is_valid:
-        # Token is invalid, raise a custom exception with a 403 status code
-        abort(401)
-    return True  # Token is valid
+
+@app.before_request
+def before_request():
+    if not verify_api_key():
+        return Response(status=401,response="Invalid API KEY")
 
 def default_error_responder(request_limit: RequestLimit):
     return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429
@@ -343,5 +343,20 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
     raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+def shutdown_handler(signal_int: int, frame: FrameType) -> None:
+    log.info(f"Caught Signal {signal.strsignal(signal_int)}")
+
+    # Safely exit program
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    # Running application locally, outside of a Google Cloud Environment
+
+    # handles Ctrl-C termination
+    signal.signal(signal.SIGINT, shutdown_handler)
+
+    app.run(host="0.0.0.0", port=8080, debug=True)
+else:
+    # handles Cloud Run container termination
+    signal.signal(signal.SIGTERM, shutdown_handler)
