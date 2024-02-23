@@ -130,7 +130,7 @@ $BE_HC_PATH = "/tika"
 # }
 
 # Create global backend services for Cloud Run
-gcloud compute backend-services update $FE_SERVICE_NAME_PREFIX-backend --global
+gcloud compute backend-services update $FE_SERVICE_NAME_PREFIX-backend --global --connection-draining-timeout=300
 gcloud compute backend-services update $BE_SERVICE_NAME_PREFIX-backend --global
 
 # # Iterate through each region and add Cloud Run Network Endpoint Group to global backend service

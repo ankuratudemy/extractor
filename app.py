@@ -1,6 +1,6 @@
 import os
 import io
-from flask import Flask, request, make_response, render_template, jsonify
+from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
 from flask_httpauth import HTTPTokenAuth
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
@@ -29,9 +29,17 @@ REDIS_PORT = os.environ.get('REDIS_PORT')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
+@app.errorhandler(401)
+def custom_401(error):
+    return jsonify({"message": 'Invalid API-KEY'}), 401
+
 @auth.verify_token
 def verify_token(token):
-    return security.api_key_required(token)
+    is_valid = security.api_key_required(token)
+    if not is_valid:
+        # Token is invalid, raise a custom exception with a 403 status code
+        abort(401)
+    return True  # Token is valid
 
 def default_error_responder(request_limit: RequestLimit):
     return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429

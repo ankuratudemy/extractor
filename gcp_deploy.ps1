@@ -22,7 +22,7 @@ $ExternalIpAddressNameBE = "xtract-be-ip-name"
 $STRUCTHUB_DOMAIN_FE="stage.api.structhub.io"
 $STRUCTHUB_DOMAIN_BE="stage-be.api.structhub.io"
 $BE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-38.0.0"
+$FE_IMAGE="us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-44.0.0"
 $BE_CONCURRENT_REQUESTS_PER_INST=1
 $FE_CONCURRENT_REQUESTS_PER_INST=1
 $PROJECT_ID="structhub-412620"
@@ -74,7 +74,7 @@ Function Deploy-CloudRunService {
             --min-instances $min `
             --allow-unauthenticated `
             --image $image `
-            --update-secrets REDIS_HOST=$REDIS_HOST:latest,REDIS_PASSWORD=$REDIS_PASSWORD:latest,SECRET_KEY=$SECRET_KEY:latest,REDIS_PORT=$REDIS_PORT:latest `
+            --set-secrets "REDIS_HOST=REDIS_HOST:1,REDIS_PASSWORD=REDIS_PASSWORD:1,SECRET_KEY=SECRET_KEY:1,REDIS_PORT=REDIS_PORT:1" `
             --cpu $cpu `
             --memory $memory `
             --port $port `
@@ -90,11 +90,6 @@ Function Deploy-CloudRunService {
             --min-instances $min `
             --no-allow-unauthenticated `
             --image $image `
-            --set-env-vars SERVER_URL=$STRUCTHUB_DOMAIN_BE `
-            --set-env-vars REDIS_HOST=$REDIS_HOST `
-            --set-env-vars REDIS_PASSWORD=$REDIS_PASSWORD `
-            --set-env-vars SECRET_KEY=$SECRET_KEY `
-            --set-env-vars REDIS_PORT=$REDIS_PORT `
             --cpu $cpu `
             --memory $memory `
             --port $port `
@@ -112,8 +107,8 @@ Function Deploy-CloudRunService {
 foreach ($region in $REGIONS) {
     # Deploy-CloudRunService -serviceName $FE_SERVICE_NAME_PREFIX -region $region -image $FE_IMAGE -cpu $FE_CPU -memory $FE_MEMORY -port $FE_PORT -max $FE_MAX_INST -min $FE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_FE -concurrency $FE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $FE_HC_PATH
     # Deploy-CloudRunService -serviceName $BE_SERVICE_NAME_PREFIX -region $region -image $BE_IMAGE -cpu $BE_CPU -memory $BE_MEMORY -port $BE_PORT -max $BE_MAX_INST -min $BE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_BE -concurrency $BE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $BE_HC_PATH
-    Deploy-CloudRunService -serviceName $FE_SERVICE_NAME_PREFIX -region $region -image $FE_IMAGE -cpu $FE_CPU -memory $FE_MEMORY -port $FE_PORT -max $FE_MAX_INST -min $FE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_FE -concurrency $FE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $FE_HC_PATH -linkedSecrets "$REDIS_HOST=$REDIS_HOST,$REDIS_PASSWORD=$REDIS_PASSWORD,$SECRET_KEY=$SECRET_KEY,$REDIS_PORT=$REDIS_PORT" 
-    Deploy-CloudRunService -serviceName $BE_SERVICE_NAME_PREFIX -region $region -image $BE_IMAGE -cpu $BE_CPU -memory $BE_MEMORY -port $BE_PORT -max $BE_MAX_INST -min $BE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_BE -concurrency $BE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $BE_HC_PATH -linkedSecrets "$REDIS_HOST=$REDIS_HOST,$REDIS_PASSWORD=$REDIS_PASSWORD,$SECRET_KEY=$SECRET_KEY,$REDIS_PORT=$REDIS_PORT"
+    Deploy-CloudRunService -serviceName $FE_SERVICE_NAME_PREFIX -region $region -image $FE_IMAGE -cpu $FE_CPU -memory $FE_MEMORY -port $FE_PORT -max $FE_MAX_INST -min $FE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_FE -concurrency $FE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $FE_HC_PATH 
+    Deploy-CloudRunService -serviceName $BE_SERVICE_NAME_PREFIX -region $region -image $BE_IMAGE -cpu $BE_CPU -memory $BE_MEMORY -port $BE_PORT -max $BE_MAX_INST -min $BE_MIN_INST -customDomainAudience $STRUCTHUB_DOMAIN_BE -concurrency $BE_CONCURRENT_REQUESTS_PER_INST -healthCheckPath $BE_HC_PATH
 }
 
 # Create global external IP addresses for Cloud Run

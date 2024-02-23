@@ -3,7 +3,7 @@ import { check, sleep } from 'k6';
 
 export let options = {
   vus: 40,         // Number of virtual users
-  duration: '30m',  // Test duration
+  duration: '2m',  // Test duration
 };
 
 const binFile = open('/C:/Users/ankur/Downloads/Format of NOC From Registered Office Owner.docx', 'b');
@@ -19,7 +19,7 @@ export default function () {
 
   let headers = {
     'Accept': 'text/plain',
-    'API-KEY': 'eyJ0ZW5hbnRfaWQiOiJzdXBwb3J0QHN0cnVjdGh1Yi5pbyIsImtleU5hbWUiOiJLZXkxIiwiY3JlYXRlZEF0IjoiMjAyNC0wMi0xNVQxODo0NTo0My41NzBaIn0', // Replace with your actual access token
+    'API-KEY': 'eyJ0ZW5hbnRfaWQiOiJzdXBwb3J0QHN0cnVjdGh1Yi5pbyIsImtleU5hbWUiOiJLZXkxIiwiY3JlYXRlZEF0IjoiMjAyNC0wMi0xNlQwMDozMjowMy4yMTFaIiwicmF0ZV9saW1pdCI6IjIwL21pbnV0ZSJ9.507af2ac8c8d500791602818cac2ee5109c7e6e87072c7024782fa0edb07b364', // Replace with your actual access token
   };
 
   // Use batch function to make multiple requests concurrently
@@ -30,6 +30,7 @@ export default function () {
 
   // Check status for each response
   responses.forEach((res) => {
+    console.log(res.status)
     check(res, {
       'status is 200': (r) => r.status === 200,
     });
