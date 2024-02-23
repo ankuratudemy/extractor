@@ -19,7 +19,7 @@ export default function () {
 
   let headers = {
     'Accept': 'text/plain',
-    'API-KEY': 'eyJ0ZW5hbnRfaWQiOiJzdXBwb3J0QHN0cnVjdGh1Yi5pbyIsImtleU5hbWUiOiJLZXkxIiwiY3JlYXRlZEF0IjoiMjAyNC0wMi0xNlQwMDozMjowMy4yMTFaIiwicmF0ZV9saW1pdCI6IjIwL21pbnV0ZSJ9.507af2ac8c8d500791602818cac2ee5109c7e6e87072c7024782fa0edb07b364', // Replace with your actual access token
+    'API-KEY': 'eyJ0ZW5hbnRfaWQiOiJpdEBzdHJ1Y3RodWIuaW8iLCJrZXlOYW1lIjoiVGVzdEtleSIsImNyZWF0ZWRBdCI6IjIwMjQtMDItMjJUMjI6MTA6NTAuMzU3WiIsInJhdGVfbGltaXQiOiI1L21pbnV0ZSJ9.ec7c88ae7a9150dd97d392682d76adfb06ad5e725b0ee1e43acb4cd00083da17', // Replace with your actual access token
   };
 
   // Use batch function to make multiple requests concurrently

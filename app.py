@@ -1,7 +1,6 @@
 import os
 import io
 from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
-from flask_httpauth import HTTPTokenAuth
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
 from shared import file_processor, google_auth, security
@@ -22,7 +21,6 @@ import signal
 sys.path.append('../')
 from shared.logging_config import log
 app = Flask(__name__)
-auth = HTTPTokenAuth(header="API-KEY")
 app.debug=True
 
 # Assuming you have Redis connection details
@@ -33,14 +31,17 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 
 def verify_api_key():
     api_key_header = request.headers.get('API-KEY')
-    return security.api_key_required(api_key_header)
+    res = security.api_key_required(api_key_header)
+    return res
 
 
 @app.before_request
 def before_request():
-    if not verify_api_key():
-        return Response(status=401,response="Invalid API KEY")
-
+    if request.endpoint == 'extract_text':  # Check if the request is for the /extract route
+        valid = verify_api_key()
+        if not valid:
+            return Response(status=401)
+        
 def default_error_responder(request_limit: RequestLimit):
     return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429
 
@@ -74,7 +75,6 @@ def health_check():
     return json.dumps({"status": "ok"})
 
 @app.route('/extract', methods=['POST'])
-@auth.login_required
 @limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def extract_text():
     lang_value = request.form.get('lang', '')
