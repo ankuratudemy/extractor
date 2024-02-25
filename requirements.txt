@@ -16,3 +16,4 @@ google-auth-httplib2
 redis 
 Flask-Limiter[redis]
 flask_httpauth
+google-cloud-pubsub
