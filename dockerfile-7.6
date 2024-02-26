@@ -44,6 +44,6 @@ COPY app.py .
 
 # Expose port 5000 for the Flask application
 EXPOSE 5000
-
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/key.json
 # Run app.py when the container launches
 CMD ["gunicorn", "-w", "1", "--worker-connections", "1", "-b", "0.0.0.0:5000","--timeout", "0", "app:app"]

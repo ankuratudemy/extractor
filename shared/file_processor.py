@@ -104,7 +104,7 @@ def split_pdf(pdf_data):
         page_data_results = executor.map(split_page_partial, page_indexes)
         pages = list(page_data_results)
 
-    return pages
+    return pages, num_pages
 
 def process_page(page_data):
     command = [

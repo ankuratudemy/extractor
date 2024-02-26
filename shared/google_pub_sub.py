@@ -28,12 +28,8 @@ def publish_messages_with_retry_settings(project_id: str, topic_id: str, message
 
     publisher = pubsub_v1.PublisherClient()
     topic_path = publisher.topic_path(project_id, topic_id)
-
-    for n in range(1, 10):
-        # Data must be a bytestring
-        data = message.encode("utf-8")
-        future = publisher.publish(topic=topic_path, data=data, retry=custom_retry)
-        print(future.result())
-
+    data = message.encode("utf-8")
+    future = publisher.publish(topic=topic_path, data=data, retry=custom_retry)
+    print(future.result())
     print(f"Published messages with retry settings to {topic_path}.")
     # [END pubsub_publisher_retry_settings]

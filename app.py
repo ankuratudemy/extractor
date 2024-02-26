@@ -3,7 +3,7 @@ import io
 from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
-from shared import file_processor, google_auth, security
+from shared import file_processor, google_auth, security, google_pub_sub
 from types import FrameType
 import json
 import concurrent.futures
@@ -124,6 +124,7 @@ def extract_text():
     uploaded_file = request.files['file']
 
     if uploaded_file:
+        num_pages=0
         # Save the uploaded file to a temporary location
         filename = secure_filename(uploaded_file.filename)
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -201,7 +202,7 @@ def extract_text():
 
             # Measure the time taken to split the PDF
             start_time = time.time()
-            pages = file_processor.split_pdf(pdf_data)
+            pages, num_pages = file_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
             # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
         
@@ -211,7 +212,6 @@ def extract_text():
 
         elif file_extension in ['ods']:
             pages = file_processor.split_ods(uploaded_file.read())
-            print(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
 
         elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'html', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
@@ -222,7 +222,7 @@ def extract_text():
             if pdf_data:
                 # Measure the time taken to split the PDF
                 start_time = time.time()
-                pages = file_processor.split_pdf(pdf_data)
+                pages, num_pages = file_processor.split_pdf(pdf_data)
                 split_time = time.time() - start_time
                 # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
             else:
@@ -257,6 +257,15 @@ def extract_text():
 
         # if os.path.exists(temp_file_path):
         #     os.remove(temp_file_path)
+        #send CREDIT USAGE TO TOPIC 'structhub-credit-usage'
+
+        #Build message for topic
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": num_pages
+        })
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings("structhub-412620","structhub-credit-usage-topic-stage", message=message)
         return json_string
     else:
         log.error('No file uploaded')
