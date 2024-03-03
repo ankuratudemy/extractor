@@ -58,11 +58,11 @@ resource "google_project_service" "run_api" {
 # }
 
 resource "google_compute_global_address" "external_ip_fe" {
-  name = local.external_ip_address_name_fe
+  name = "${local.external_ip_address_name_fe}${local.fe_domain_suffix}"
 }
 
 resource "google_compute_global_address" "external_ip_be" {
-  name = local.external_ip_address_name_be
+  name = "${local.external_ip_address_name_be}${local.be_domain_suffix}"
 }
 
 
@@ -215,6 +215,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         tcp_socket {
           port = local.fe_port
         }
+      }
+      env {
+        name = "SERVER_URL"
+        value = local.environment == "prod" ? "api.structhub.io" : "stage-be.api.structhub.io"
       }
       env {
         name = "REDIS_HOST"
