@@ -7,11 +7,11 @@ provider "google" {
 variable "environment" {
   description = "Environment: 'prod'"
   type = string
-  default     = "prod"
+  default     = "stage"
 }
 
 locals {
-  environment             = "prod"  # Set the desired environment here
+  environment             = var.environment  # Set the desired environment here
   regions                 = ["northamerica-northeast1"]
   fe_max_inst             = 40
   fe_min_inst             = 0
@@ -117,7 +117,7 @@ resource "google_compute_managed_ssl_certificate" "fe_ssl_cert" {
 resource "google_compute_managed_ssl_certificate" "be_ssl_cert" {
   name = "${local.be_service_name_prefix}${local.be_domain_suffix}-structhub-cert"
   managed {
-    domains = [local.environment == "prod" ? "api.structhub.io" : "stage-be.api.structhub.io"]
+    domains = [local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"]
   }
 }
 
@@ -197,7 +197,6 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
   name             = "${local.fe_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
   location         = each.key
   ingress          = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
-  custom_audiences = [local.environment == "prod" ? "api.structhub.io" : "stage-be.api.structhub.io"]
   template {
     scaling {
       max_instance_count = local.fe_max_inst
@@ -219,13 +218,13 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
       }
       env {
         name = "SERVER_URL"
-        value = local.environment == "prod" ? "api.structhub.io" : "stage-be.api.structhub.io"
+        value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
       }
       env {
         name = "REDIS_HOST"
         value_source {
           secret_key_ref {
-            secret  = "REDIS_HOST"
+            secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
             version = "1"
           }
         }
@@ -234,7 +233,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         name = "REDIS_PASSWORD"
         value_source {
           secret_key_ref {
-            secret  = "REDIS_PASSWORD"
+            secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
             version = "1"
           }
         }
@@ -243,7 +242,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         name = "SECRET_KEY"
         value_source {
           secret_key_ref {
-            secret  = "SECRET_KEY"
+            secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
             version = "1"
           }
         }
@@ -252,7 +251,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         name = "REDIS_PORT"
         value_source {
           secret_key_ref {
-            secret  = "REDIS_PORT"
+            secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
             version = "1"
           }
         }
@@ -328,7 +327,7 @@ resource "google_cloud_run_v2_service" "be_cloud_run" {
     percent = 100
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
-  custom_audiences = [local.environment == "prod" ? "api.structhub.io" : "stage-be.api.structhub.io"]
+  custom_audiences = [local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"]
   depends_on = [
     google_project_service.run_api
   ]
