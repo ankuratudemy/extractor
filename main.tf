@@ -6,11 +6,12 @@ provider "google" {
 
 variable "environment" {
   description = "Environment: 'stage' or 'prod'"
+  type = string
   default     = "stage"
 }
 
 locals {
-  environment             = "stage"  # Set the desired environment here
+  environment             = var.environment  # Set the desired environment here
   regions                 = ["northamerica-northeast1"]
   fe_max_inst             = 40
   fe_min_inst             = 0
