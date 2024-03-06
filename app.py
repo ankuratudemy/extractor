@@ -29,6 +29,12 @@ REDIS_PORT = os.environ.get('REDIS_PORT')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
+#Other env specific varibales:
+
+GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
+GCP_CREDIT_USAGE_TOPIC = os.environ.get('GCP_CREDIT_USAGE_TOPIC')
+UPLOADS_FOLDER = os.environ.get('UPLOADS_FOLDER')
+
 def verify_api_key():
     api_key_header = request.headers.get('API-KEY')
     res = security.api_key_required(api_key_header)
@@ -54,7 +60,6 @@ limiter = Limiter(
         on_breach=default_error_responder
     )
 
-UPLOADS_FOLDER = '/app/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 SERVER_URL = f"https://{os.environ.get('SERVER_URL')}/tika"
 
@@ -265,7 +270,7 @@ def extract_text():
         "creditsUsed": num_pages
         })
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
-        google_pub_sub.publish_messages_with_retry_settings("structhub-412620","structhub-credit-usage-topic-stage", message=message)
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         return json_string
     else:
         log.error('No file uploaded')

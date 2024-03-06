@@ -1,47 +1,76 @@
 provider "google" {
   # credentials = file("/dev/null")
-  project     = "structhub-412620"
-  region      = "us-central1"
+  project = "structhub-412620"
+  region  = "us-central1"
 }
 
 variable "environment" {
   description = "Environment: 'prod'"
-  type = string
+  type        = string
   default     = "stage"
 }
 
 locals {
-  environment             = var.environment  # Set the desired environment here
-  regions                 = ["northamerica-northeast1"]
-  fe_max_inst             = 40
-  fe_min_inst             = 0
-  fe_cpu                  = 1
-  fe_memory               = "2Gi"
-  fe_port                 = 5000
-  be_max_inst             = 60
-  be_min_inst             = 0
-  be_cpu                  = 1
-  be_memory               = "2Gi"
-  be_port                 = 9998
-  external_ip_address_name_fe = "xtract-fe-ip-name"
-  external_ip_address_name_be = "xtract-be-ip-name"
-  be_image                = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-  fe_image                = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-53.0.0"
+  environment                     = var.environment # Set the desired environment here
+  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-east5", "us-west1", "us-west2", "asia-south1", "asia-south2", "europe-west2", "europe-west3"] : ["northamerica-northeast1", "northamerica-northeast2"]
+  fe_max_inst                     = 40
+  fe_min_inst                     = 0
+  fe_cpu                          = 1
+  fe_memory                       = "2Gi"
+  fe_port                         = 5000
+  be_max_inst                     = 60
+  be_min_inst                     = 0
+  be_cpu                          = 1
+  be_memory                       = "2Gi"
+  be_port                         = 9998
+  external_ip_address_name_fe     = "xtract-fe-ip-name"
+  external_ip_address_name_be     = "xtract-be-ip-name"
+  be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-55.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
-  project_id              = "structhub-412620"
-  fe_service_name_prefix  = "xtract-fe"
-  be_service_name_prefix  = "xtract-be"
-  fe_hc_path              = "/health"
-  be_hc_path              = "/tika"
-  fe_domain_suffix        = local.environment == "prod" ? "" : "-stage"
-  be_domain_suffix        = local.environment == "prod" ? "" : "-stage"
+  project_id                      = "structhub-412620"
+  fe_service_name_prefix          = "xtract-fe"
+  be_service_name_prefix          = "xtract-be"
+  fe_hc_path                      = "/health"
+  be_hc_path                      = "/tika"
+  fe_domain_suffix                = local.environment == "prod" ? "" : "-stage"
+  be_domain_suffix                = local.environment == "prod" ? "" : "-stage"
 }
+# Ran only once to create terraform state buckets
+# resource "google_storage_bucket" "structhub_bucket" {
+#   name     = "structhub_terraform_state_bucket_${local.environment}"
+#   location = "us-central1" # Choose a location that suits your requirements
+
+#   # Optional: Add any additional configuration for the bucket if needed
+#   versioning {
+#     enabled = true
+#   }
+
+#   labels = {
+#     environment = local.environment
+#     project     = local.project_id
+#   }
+# }
+
+
 
 resource "google_project_service" "compute_api" {
   service                    = "compute.googleapis.com"
   disable_dependent_services = false
   disable_on_destroy         = false
+}
+
+# Enable Eventarc API
+resource "google_project_service" "eventarc" {
+  service            = "eventarc.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Enable Pub/Sub API
+resource "google_project_service" "pubsub" {
+  service            = "pubsub.googleapis.com"
+  disable_on_destroy = false
 }
 
 resource "google_project_service" "run_api" {
@@ -194,9 +223,9 @@ resource "google_compute_region_network_endpoint_group" "be_backend" {
 resource "google_cloud_run_v2_service" "fe_cloud_run" {
   for_each = toset(local.regions)
 
-  name             = "${local.fe_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
-  location         = each.key
-  ingress          = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  name     = "${local.fe_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
+  location = each.key
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
     scaling {
       max_instance_count = local.fe_max_inst
@@ -217,8 +246,20 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         }
       }
       env {
-        name = "SERVER_URL"
+        name  = "SERVER_URL"
         value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+      }
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+      }
+      env {
+        name  = "GCP_CREDIT_USAGE_TOPIC"
+        value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+      }
+      env {
+        name  = "UPLOADS_FOLDER"
+        value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
       }
       env {
         name = "REDIS_HOST"
@@ -294,7 +335,7 @@ resource "google_cloud_run_service_iam_binding" "be_cloud_run_iam_binding" {
   role     = "roles/run.invoker"
   members = [
     "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
-      ]
+  ]
 }
 
 resource "google_cloud_run_v2_service" "be_cloud_run" {
@@ -331,4 +372,193 @@ resource "google_cloud_run_v2_service" "be_cloud_run" {
   depends_on = [
     google_project_service.run_api
   ]
+}
+
+resource "google_pubsub_topic" "credit_usage_dead_letter_topic" {
+  name                       = "structhub-credit-usage-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+resource "google_pubsub_topic" "credit_usage_topic" {
+  name                       = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+# Generates an archive of the source code compressed as a .zip file.
+data "archive_file" "credit_usage_function_source" {
+  type        = "zip"
+  source_dir  = "../../credit-usage-function"
+  output_path = "${path.module}/function.zip"
+}
+
+# Add source code zip to the Cloud Function's bucket (Cloud_function_bucket) 
+resource "google_storage_bucket_object" "zip" {
+  source       = "${path.module}/function.zip"
+  content_type = "application/zip"
+  name         = "credit-usage-function${local.fe_domain_suffix}.zip"
+  bucket       = google_storage_bucket.function_bucket.name
+  depends_on = [
+    google_storage_bucket.function_bucket,
+    data.archive_file.credit_usage_function_source
+  ]
+}
+
+# resource "google_cloudfunctions_function" "credit_usage_function" {
+#   name                  = "credit-usage-function${local.fe_domain_suffix}"
+#   runtime               = "python310"
+#   source_archive_bucket = google_storage_bucket.function_bucket.name
+#   source_archive_object = "credit-usage-function${local.fe_domain_suffix}.zip"
+#   entry_point           = "pubsub_to_postgresql"
+#   available_memory_mb   = 256
+#   timeout               = 60
+
+#   event_trigger {
+#     event_type = "google.pubsub.topic.publish"
+#     resource   = google_pubsub_topic.credit_usage_topic.name
+#     failure_policy {
+#       retry = true
+#     }
+#   }
+
+
+#   environment_variables = {
+#     MY_ENV_VAR = "sample_env_for_future_ref"
+#   }
+
+#   secret_environment_variables {
+#     secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+#     key     = "PSQL_HOST"
+#     version = "latest"
+#   }
+
+#   secret_environment_variables {
+#     key     = "PSQL_PASSWORD"
+#     secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+#     version = "latest"
+#   }
+
+#   secret_environment_variables {
+#     key     = "PSQL_USERNAME"
+#     secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+#     version = "latest"
+#   }
+
+#   secret_environment_variables {
+#     key     = "PSQL_DATABASE"
+#     secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+#     version = "latest"
+#   }
+
+#   secret_environment_variables {
+#     key     = "PSQL_PORT"
+#     secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+#     version = "latest"
+#   }
+
+#   depends_on = [
+#     google_pubsub_topic.credit_usage_topic,
+#   ]
+# }
+
+resource "google_cloudfunctions2_function" "credit_usage_function" {
+  name     = "credit-usage-function${local.fe_domain_suffix}"
+  location = "us-central1"
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+    pubsub_topic   = google_pubsub_topic.credit_usage_topic.id
+  }
+  build_config {
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_bucket.name
+        object = "credit-usage-function${local.fe_domain_suffix}.zip"
+      }
+    }
+    entry_point = "pubsub_to_postgresql"
+    runtime     = "python310"
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+    environment_variables = {
+      MY_ENV_VAR = "sample_env_for_future_ref"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "REDIS_HOST"
+      secret     = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "REDIS_PASSWORD"
+      secret     = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "REDIS_PORT"
+      secret     = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+      version    = "latest"
+    }
+
+
+  }
+  depends_on = [
+    google_pubsub_topic.credit_usage_topic,
+    google_pubsub_topic.credit_usage_dead_letter_topic, # Ensure the dead letter topic is created first
+  ]
+}
+
+resource "google_storage_bucket" "function_bucket" {
+  name     = "credit-usage-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+# Create a subscription so that we don't lose messages published to dead letter topic
+resource "google_pubsub_subscription" "credit_usage_dead_letter_subscription" {
+  name  = "credit_usage_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.credit_usage_dead_letter_topic.name
 }
