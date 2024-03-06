@@ -26,7 +26,7 @@ locals {
   external_ip_address_name_fe     = "xtract-fe-ip-name"
   external_ip_address_name_be     = "xtract-be-ip-name"
   be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-56.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-59.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
   project_id                      = "structhub-412620"

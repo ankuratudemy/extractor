@@ -31,7 +31,8 @@ def update_remaining_credits(username_credits_remaining, value):
     while retries < MAX_RETRIES:
         try:
             redis_conn = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
-            redis_conn.set(name=username_credits_remaining, value=value)
+            res = redis_conn.set(name=username_credits_remaining, value=value)
+            print(res)
             return True
         except redis.RedisError as e:
             print(f"Error connecting to Redis: {str(e)}")
