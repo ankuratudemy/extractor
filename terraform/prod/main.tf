@@ -26,7 +26,7 @@ locals {
   external_ip_address_name_fe     = "xtract-fe-ip-name"
   external_ip_address_name_be     = "xtract-be-ip-name"
   be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-55.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-59.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
   project_id                      = "structhub-412620"
@@ -395,7 +395,7 @@ data "archive_file" "credit_usage_function_source" {
 resource "google_storage_bucket_object" "zip" {
   source       = "${path.module}/function.zip"
   content_type = "application/zip"
-  name         = "credit-usage-function${local.fe_domain_suffix}.zip"
+  name         = "credit-usage-function${local.fe_domain_suffix}-${data.archive_file.credit_usage_function_source.output_md5}.zip"
   bucket       = google_storage_bucket.function_bucket.name
   depends_on = [
     google_storage_bucket.function_bucket,
@@ -473,7 +473,7 @@ resource "google_cloudfunctions2_function" "credit_usage_function" {
     source {
       storage_source {
         bucket = google_storage_bucket.function_bucket.name
-        object = "credit-usage-function${local.fe_domain_suffix}.zip"
+        object = "credit-usage-function${local.fe_domain_suffix}-${data.archive_file.credit_usage_function_source.output_md5}.zip"
       }
     }
     entry_point = "pubsub_to_postgresql"

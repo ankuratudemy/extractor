@@ -395,7 +395,7 @@ data "archive_file" "credit_usage_function_source" {
 resource "google_storage_bucket_object" "zip" {
   source       = "${path.module}/function.zip"
   content_type = "application/zip"
-  name         = "credit-usage-function${local.fe_domain_suffix}.zip"
+  name         = "credit-usage-function${local.fe_domain_suffix}-${data.archive_file.credit_usage_function_source.output_md5}.zip"
   bucket       = google_storage_bucket.function_bucket.name
   depends_on = [
     google_storage_bucket.function_bucket,
@@ -473,7 +473,7 @@ resource "google_cloudfunctions2_function" "credit_usage_function" {
     source {
       storage_source {
         bucket = google_storage_bucket.function_bucket.name
-        object = "credit-usage-function${local.fe_domain_suffix}.zip"
+        object = "credit-usage-function${local.fe_domain_suffix}-${data.archive_file.credit_usage_function_source.output_md5}.zip"
       }
     }
     entry_point = "pubsub_to_postgresql"

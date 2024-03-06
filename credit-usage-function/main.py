@@ -73,7 +73,7 @@ def pubsub_to_postgresql(event, context):
 
                     # Update User table (subtract creditsUsed from credits)
                     cursor.execute(
-                        'UPDATE "User" SET "credits" = "credits" - %s WHERE "username" = %s',
+                        'UPDATE "User" SET "credits" = "credits" - %s WHERE "username" = %s RETURNING credits',
                         (data["creditsUsed"], data["username"]),
                     )
                     # Fetch the updated credits value
