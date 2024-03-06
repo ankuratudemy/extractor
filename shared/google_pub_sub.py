@@ -1,4 +1,4 @@
-def publish_messages_with_retry_settings(project_id: str, topic_id: str, message, bearer_token) -> None:
+def publish_messages_with_retry_settings(project_id: str, topic_id: str, message) -> None:
     """Publishes messages with custom retry settings."""
     # [START pubsub_publisher_retry_settings]
     from google import api_core
