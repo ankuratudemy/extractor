@@ -86,11 +86,11 @@ def extract_text():
     ocr_value = request.form.get('ocr', '')
     out = request.form.get('out_format', '')
     
-    # Define mapping for lang_value
-    lang_mapping = {
-        'hindi': 'hin',
-        # Add more mappings as needed
-    }
+    # # Define mapping for lang_value
+    # lang_mapping = {
+    #     'hindi': 'hin',
+    #     # Add more mappings as needed
+    # }
 
     # Define mapping for lang_value
     out_format_mapping = {
@@ -106,7 +106,7 @@ def extract_text():
     default_out_format = 'text/plain'
 
     # Set values based on conditions
-    x_tika_ocr_language = lang_mapping.get(lang_value, '')
+    x_tika_ocr_language = lang_value
     x_tika_pdf_ocr_strategy = 'no_ocr' if ocr_value.lower() == 'false' else ('ocr_only' if ocr_value.lower() == 'true' else default_ocr_strategy)
     x_tika_accept = out_format_mapping.get(out, default_out_format)
 

@@ -26,7 +26,7 @@ locals {
   external_ip_address_name_fe     = "xtract-fe-ip-name"
   external_ip_address_name_be     = "xtract-be-ip-name"
   be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-59.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-60.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
   project_id                      = "structhub-412620"
@@ -266,7 +266,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value_source {
           secret_key_ref {
             secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
-            version = "1"
+            version = "latest"
           }
         }
       }
@@ -275,7 +275,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value_source {
           secret_key_ref {
             secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
-            version = "1"
+            version = "latest"
           }
         }
       }
@@ -284,7 +284,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value_source {
           secret_key_ref {
             secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
-            version = "1"
+            version = "latest"
           }
         }
       }
@@ -293,7 +293,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value_source {
           secret_key_ref {
             secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
-            version = "1"
+            version = "latest"
           }
         }
       }
