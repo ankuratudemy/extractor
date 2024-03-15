@@ -12,21 +12,17 @@ variable "environment" {
 
 locals {
   environment                     = var.environment # Set the desired environment here
-  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-east5", "us-west1", "us-west2", "asia-south1", "asia-south2", "europe-west2", "europe-west3"] : ["northamerica-northeast1", "northamerica-northeast2"]
-  fe_max_inst                     = 40
-  fe_min_inst                     = 0
+  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-east5", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1" ] : ["northamerica-northeast1", "northamerica-northeast2"]
   fe_cpu                          = 1
   fe_memory                       = "2Gi"
   fe_port                         = 5000
-  be_max_inst                     = 60
-  be_min_inst                     = 0
   be_cpu                          = 1
   be_memory                       = "2Gi"
   be_port                         = 9998
   external_ip_address_name_fe     = "xtract-fe-ip-name"
   external_ip_address_name_be     = "xtract-be-ip-name"
-  be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:1.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-60.0.0"
+  be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:2.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-67.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
   project_id                      = "structhub-412620"
@@ -36,6 +32,135 @@ locals {
   be_hc_path                      = "/tika"
   fe_domain_suffix                = local.environment == "prod" ? "" : "-stage"
   be_domain_suffix                = local.environment == "prod" ? "" : "-stage"
+
+  region_instance_counts = {
+    "northamerica-northeast1" = {
+      fe_max_inst = 1000
+      fe_min_inst = 0
+      be_max_inst = 1000
+      be_min_inst = 0
+    }
+    "northamerica-northeast2" = {
+      fe_max_inst = 500
+      fe_min_inst = 0
+      be_max_inst = 500
+      be_min_inst = 0
+    }
+    "us-central1" = {
+      fe_max_inst = 12000
+      fe_min_inst = 0
+      be_max_inst = 12000
+      be_min_inst = 0
+    }
+    "us-south1" = {
+      fe_max_inst = 4000
+      fe_min_inst = 0
+      be_max_inst = 4000
+      be_min_inst = 0
+    }
+    "us-east4" = {
+      fe_max_inst = 5000
+      fe_min_inst = 0
+      be_max_inst = 5000
+      be_min_inst = 0
+    }
+    "us-east1" = {
+      fe_max_inst = 7000
+      fe_min_inst = 0
+      be_max_inst = 7000
+      be_min_inst = 0
+    }
+    "us-east5" = {
+      fe_max_inst = 4000
+      fe_min_inst = 0
+      be_max_inst = 4000
+      be_min_inst = 0
+    }
+    "us-west1" = {
+      fe_max_inst = 4500
+      fe_min_inst = 0
+      be_max_inst = 4500
+      be_min_inst = 0
+    }
+    "us-west2" = {
+      fe_max_inst = 4500
+      fe_min_inst = 0
+      be_max_inst = 4500
+      be_min_inst = 0
+    }
+    "us-west3" = {
+      fe_max_inst = 3000
+      fe_min_inst = 0
+      be_max_inst = 3000
+      be_min_inst = 0
+    }
+    "us-west4" = {
+      fe_max_inst = 4000
+      fe_min_inst = 0
+      be_max_inst = 4000
+      be_min_inst = 0
+    }
+    "asia-south1" = {
+      fe_max_inst = 4000
+      fe_min_inst = 0
+      be_max_inst = 4000
+      be_min_inst = 0
+    }
+    "asia-south2" = {
+      fe_max_inst = 1000
+      fe_min_inst = 0
+      be_max_inst = 1000
+      be_min_inst = 0
+    }
+    "asia-southeast1" = {
+      fe_max_inst = 4000
+      fe_min_inst = 0
+      be_max_inst = 4000
+      be_min_inst = 0
+    }
+    "asia-east1" = {
+      fe_max_inst = 4000
+      fe_min_inst = 0
+      be_max_inst = 4000
+      be_min_inst = 0
+    }
+    "asia-south2" = {
+      fe_max_inst = 1000
+      fe_min_inst = 0
+      be_max_inst = 1000
+      be_min_inst = 0
+    }
+    "europe-west1" = {
+      fe_max_inst = 9000
+      fe_min_inst = 0
+      be_max_inst = 9000
+      be_min_inst = 0
+    }
+    "europe-west2" = {
+      fe_max_inst = 5000
+      fe_min_inst = 0
+      be_max_inst = 5000
+      be_min_inst = 0
+    }
+    "europe-west3" = {
+      fe_max_inst = 4500
+      fe_min_inst = 0
+      be_max_inst = 4500
+      be_min_inst = 0
+    }
+    "europe-west4" = {
+      fe_max_inst = 5000
+      fe_min_inst = 0
+      be_max_inst = 5000
+      be_min_inst = 0
+    }
+    "australia-southeast1" = {
+      fe_max_inst = 5000
+      fe_min_inst = 0
+      be_max_inst = 5000
+      be_min_inst = 0
+    }
+  }
 }
 # Ran only once to create terraform state buckets
 # resource "google_storage_bucket" "structhub_bucket" {
@@ -219,7 +344,6 @@ resource "google_compute_region_network_endpoint_group" "be_backend" {
     service = google_cloud_run_v2_service.be_cloud_run[local.regions[count.index]].name
   }
 }
-
 resource "google_cloud_run_v2_service" "fe_cloud_run" {
   for_each = toset(local.regions)
 
@@ -228,8 +352,8 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
     scaling {
-      max_instance_count = local.fe_max_inst
-      min_instance_count = local.fe_min_inst
+      max_instance_count = local.region_instance_counts[each.key].fe_max_inst
+      min_instance_count = local.region_instance_counts[each.key].fe_min_inst
     }
     containers {
       ports {
@@ -316,6 +440,7 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
   ]
 }
 
+
 resource "google_cloud_run_service_iam_binding" "fe_cloud_run_iam_binding" {
   for_each = toset(local.regions)
 
@@ -346,8 +471,8 @@ resource "google_cloud_run_v2_service" "be_cloud_run" {
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
     scaling {
-      max_instance_count = local.be_max_inst
-      min_instance_count = local.be_min_inst
+      max_instance_count = local.region_instance_counts[each.key].be_max_inst
+      min_instance_count = local.region_instance_counts[each.key].be_min_inst
     }
     containers {
       ports {

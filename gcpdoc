@@ -107,3 +107,7 @@ for region in "${REGIONS[@]}"; do
         --instance-group-zone=$region-a \
         --global
 done
+
+
+## GEt quota information for regions
+gcloud alpha services quota list --service=run.googleapis.com --consumer=projects/structhub-412620

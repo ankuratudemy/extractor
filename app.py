@@ -49,7 +49,8 @@ def before_request():
             return Response(status=401)
         
 def default_error_responder(request_limit: RequestLimit):
-    return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429
+    # return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429
+    return Response(status=429)
 
 limiter = Limiter(
         key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
