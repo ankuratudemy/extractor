@@ -272,7 +272,8 @@ def extract_text():
         })
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
-        return json_string
+        return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
+
     else:
         log.error('No file uploaded')
         return 'No file uploaded.', 400
@@ -337,7 +338,9 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
                     retries += 1
                     await asyncio.sleep(1)  # You may adjust the sleep duration
                     continue  # Retry the request
-                return await response.text(), page_num
+                content = await response.read()  # Read the content of the response
+                text_content = content.decode('utf-8', errors='ignore')  # Decode bytes to Unicode text, ignoring errors
+                return text_content, page_num
 
         except aiohttp.ClientError as e:
             print(f"Error during request for page {page_num}: {str(e)}")
