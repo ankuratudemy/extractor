@@ -186,6 +186,21 @@ def extract_text():
             "application/vnd.ms-powerpoint.slideshow": 'pps',
             "application/vnd.ms-powerpoint.presentation": 'ppt',
             "application/vnd.ms-powerpoint.addin": 'ppa',
+            # Email formats
+            "message/rfc822": 'eml',  # EML format
+            "application/vnd.ms-outlook": 'msg',  # MSG format
+            "application/mbox": 'mbox',  # MBOX format
+            "application/octet-stream": 'pst',  # PST format
+            "application/ost": 'ost',  # OST format
+            "application/emlx": 'emlx',  # EMLX format
+            "application/dbx": 'dbx',  # DBX format
+            "application/dat": 'dat',  # Windows Mail (.dat) format
+            # Image formats
+            "image/jpeg": 'jpg',  # JPEG format
+            "image/png": 'png',  # PNG format
+            "image/gif": 'gif',  # GIF format
+            "image/tiff": 'tiff',  # TIFF format
+            "image/bmp": 'bmp'  # BMP format
         }
         # Reverse mapping of content types to file extensions
         reverse_file_ext_map = {v: k for k, v in oFileExtMap.items()}
@@ -216,6 +231,14 @@ def extract_text():
             pages = file_processor.split_excel(uploaded_file.read())
             contentType = reverse_file_ext_map.get(file_extension, '')
 
+        elif file_extension in ['eml', 'msg', 'pst', 'ost', 'mbox', 'dbx', 'dat', 'emlx', ]:
+            pages = [("1", io.BytesIO(uploaded_file.read()))]
+            contentType = reverse_file_ext_map.get(file_extension, '')
+
+        elif file_extension in ['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp']:
+            pages = [("1", io.BytesIO(uploaded_file.read()))]
+            contentType = reverse_file_ext_map.get(file_extension, '')
+            
         elif file_extension in ['ods']:
             pages = file_processor.split_ods(uploaded_file.read())
             contentType = reverse_file_ext_map.get(file_extension, '')

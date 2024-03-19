@@ -12,7 +12,7 @@ variable "environment" {
 
 locals {
   environment                     = var.environment # Set the desired environment here
-  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-east5", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1" ] : ["northamerica-northeast1", "northamerica-northeast2"]
+  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1" ] : ["northamerica-northeast1", "northamerica-northeast2"]
   fe_cpu                          = 1
   fe_memory                       = "2Gi"
   fe_port                         = 5000
@@ -22,7 +22,7 @@ locals {
   external_ip_address_name_fe     = "xtract-fe-ip-name"
   external_ip_address_name_be     = "xtract-be-ip-name"
   be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:2.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-76.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-77.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
   project_id                      = "structhub-412620"
