@@ -190,7 +190,7 @@ def extract_text():
             "message/rfc822": 'eml',  # EML format
             "application/vnd.ms-outlook": 'msg',  # MSG format
             "application/mbox": 'mbox',  # MBOX format
-            "application/octet-stream": 'pst',  # PST format
+            "application/vnd.ms-outlook": 'pst',  # PST format
             "application/ost": 'ost',  # OST format
             "application/emlx": 'emlx',  # EMLX format
             "application/dbx": 'dbx',  # DBX format
@@ -229,18 +229,22 @@ def extract_text():
         
         elif file_extension in ['csv', 'xls', 'xltm', 'xltx', 'xlsx', 'tsv', 'ots']:
             pages = file_processor.split_excel(uploaded_file.read())
+            num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
 
         elif file_extension in ['eml', 'msg', 'pst', 'ost', 'mbox', 'dbx', 'dat', 'emlx', ]:
             pages = [("1", io.BytesIO(uploaded_file.read()))]
+            num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
 
         elif file_extension in ['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp']:
             pages = [("1", io.BytesIO(uploaded_file.read()))]
+            num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
-            
+
         elif file_extension in ['ods']:
             pages = file_processor.split_ods(uploaded_file.read())
+            num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
 
         elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'html', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
@@ -293,6 +297,8 @@ def extract_text():
         "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
         "creditsUsed": num_pages
         })
+        log.info(f"Number of pages processed: {num_pages}")
+        log.info(f"Message to topic: {message}")
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}

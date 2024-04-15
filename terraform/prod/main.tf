@@ -12,7 +12,7 @@ variable "environment" {
 
 locals {
   environment                     = var.environment # Set the desired environment here
-  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1" ] : ["northamerica-northeast1", "northamerica-northeast2"]
+  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-east5", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1" ] : ["northamerica-northeast1", "northamerica-northeast2"]
   fe_cpu                          = 1
   fe_memory                       = "2Gi"
   fe_port                         = 5000
@@ -22,7 +22,7 @@ locals {
   external_ip_address_name_fe     = "xtract-fe-ip-name"
   external_ip_address_name_be     = "xtract-be-ip-name"
   be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:2.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-77.0.0"
+  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-83.0.0"
   be_concurrent_requests_per_inst = 1
   fe_concurrent_requests_per_inst = 1
   project_id                      = "structhub-412620"
@@ -244,7 +244,7 @@ resource "google_compute_backend_service" "fe_backend" {
 resource "google_compute_backend_service" "be_backend" {
   name                            = "${local.be_service_name_prefix}${local.be_domain_suffix}-backend"
   load_balancing_scheme           = "EXTERNAL_MANAGED"
-  connection_draining_timeout_sec = 70
+  connection_draining_timeout_sec = 185
   locality_lb_policy              = "RANDOM"
   enable_cdn                      = false
 
@@ -486,7 +486,7 @@ resource "google_cloud_run_v2_service" "be_cloud_run" {
         }
       }
     }
-    timeout                          = "110s"
+    timeout                          = "180s"
     max_instance_request_concurrency = local.be_concurrent_requests_per_inst
   }
   traffic {

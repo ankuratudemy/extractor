@@ -8,6 +8,7 @@ from google.cloud import pubsub_v1
 import redis 
 import time
 
+
 # Retrieve PostgreSQL connection parameters from environment variables
 db_params = {
     "host": os.environ.get("PSQL_HOST"),
@@ -32,7 +33,7 @@ def update_remaining_credits(username_credits_remaining, value):
         try:
             redis_conn = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
             res = redis_conn.set(name=username_credits_remaining, value=value)
-            print(res)
+            print(f"Redis db response: {res}")
             return True
         except redis.RedisError as e:
             print(f"Error connecting to Redis: {str(e)}")
@@ -53,10 +54,12 @@ def pubsub_to_postgresql(event, context):
     # Parse the message data as JSON
     try:
         data = json.loads(message_data)
+        print(f"Data Received from topic: {data}")
     except json.JSONDecodeError:
         print("Error decoding Pub/Sub message.")
         return
 
+    # Perform the PostgreSQL transaction
     # Perform the PostgreSQL transaction
     try:
         with psycopg2.connect(**db_params) as connection:
@@ -65,6 +68,10 @@ def pubsub_to_postgresql(event, context):
                 connection.autocommit = False
 
                 try:
+                    # Acquire an advisory lock to serialize access to the credit update
+                    lock_id = int(time.time() * 1000)  # milliseconds since the epoch
+                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
+
                     # Update CreditUsage table
                     cursor.execute(
                         'INSERT INTO "CreditUsage" ("username", "creditsUsed") VALUES (%s, %s)',
@@ -78,6 +85,7 @@ def pubsub_to_postgresql(event, context):
                     )
                     # Fetch the updated credits value
                     updated_credits = cursor.fetchone()[0]
+                    print(f"updated_credits: {updated_credits}")
                     remaining_credits_key = f"{data['username']}_credits_remaining"
                     # Update Redis key with the remaining credits value
                     update_remaining_credits(remaining_credits_key, updated_credits)
@@ -100,6 +108,7 @@ def pubsub_to_postgresql(event, context):
     except Exception as e:
         print(f"Error connecting to PostgreSQL: {str(e)}")
         sys.exit("Function execution failed.")
+
 
 # Sample usage:
 # pubsub_to_postgresql({"data": "base64_encoded_message"}, None)
