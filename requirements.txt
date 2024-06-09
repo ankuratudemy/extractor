@@ -17,5 +17,6 @@ redis
 Flask-Limiter[redis]
 flask_httpauth
 google-cloud-pubsub
+google-cloud-storage
 pyarmor
 cython

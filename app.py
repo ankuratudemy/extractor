@@ -43,7 +43,7 @@ def verify_api_key():
 
 @app.before_request
 def before_request():
-    if request.endpoint == 'extract_text':  # Check if the request is for the /extract route
+    if request.endpoint == 'extract':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
