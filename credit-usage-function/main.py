@@ -68,6 +68,18 @@ def pubsub_to_postgresql(event, context):
                 connection.autocommit = False
 
                 try:
+                    # Check if 'username' is provided, if not, fetch using 'userid'
+                    if not data.get('username'):
+                        if not data.get('userid'):
+                            raise ValueError("Either 'username' or 'userid' must be provided.")
+                        else:
+                            # Fetch the username from the User table by userid
+                            cursor.execute('SELECT "username" FROM "User" WHERE "id" = %s', (data['userid'],))
+                            fetched_username = cursor.fetchone()[0]
+                            if not fetched_username:
+                                raise ValueError(f"User ID {data['userid']} not found in the database.")
+                            
+                            data['username'] = fetched_username  # Update the data dictionary with the username
                     # Acquire an advisory lock to serialize access to the credit update
                     lock_id = int(time.time() * 1000)  # milliseconds since the epoch
                     cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))

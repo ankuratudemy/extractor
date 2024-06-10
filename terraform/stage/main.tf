@@ -11,206 +11,206 @@ variable "environment" {
 }
 
 locals {
-  environment                     = var.environment # Set the desired environment here
-  us_regions                      = ["us-central1"]
-  regions                         = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4","us-south1",  "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1" ] : ["northamerica-northeast1", "northamerica-northeast2"]
-  fe_cpu                          = 1
-  fe_memory                       = "2Gi"
-  fe_port                         = 5000
-  be_cpu                          = 1
-  be_memory                       = "2Gi"
-  be_port                         = 9998
-  indexer_cpu                     = 1
-  indexer_memory                  = "2Gi"
-  indexer_port                    = 5000
-  external_ip_address_name_fe     = "xtract-fe-ip-name"
-  internal_ip_address_name_indexer = "xtract-indexer-ip-name"
-  external_ip_address_name_be     = "xtract-be-ip-name"
-  be_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-84.0.0"
-  indexer_image                   = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:1.0.0"
-  be_concurrent_requests_per_inst = 1
-  fe_concurrent_requests_per_inst = 1
+  environment                          = var.environment # Set the desired environment here
+  us_regions                           = ["us-central1"]
+  regions                              = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"] : ["northamerica-northeast1", "northamerica-northeast2"]
+  fe_cpu                               = 1
+  fe_memory                            = "2Gi"
+  fe_port                              = 5000
+  be_cpu                               = 1
+  be_memory                            = "2Gi"
+  be_port                              = 9998
+  indexer_cpu                          = 1
+  indexer_memory                       = "2Gi"
+  indexer_port                         = 5000
+  external_ip_address_name_fe          = "xtract-fe-ip-name"
+  internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
+  external_ip_address_name_be          = "xtract-be-ip-name"
+  be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-84.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:19.0.0"
+  be_concurrent_requests_per_inst      = 1
+  fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
-  project_id                      = "structhub-412620"
-  project_number                  = "485124114765"
-  fe_service_name_prefix          = "xtract-fe"
-  indexer_service_name_prefix     = "xtract-indexer"
-  be_service_name_prefix          = "xtract-be"
-  fe_hc_path                      = "/health"
-  be_hc_path                      = "/tika"
-  fe_domain_suffix                = local.environment == "prod" ? "" : "-stage"
-  indexer_domain_suffix           = local.environment == "prod" ? "" : "-stage"
-  be_domain_suffix                = local.environment == "prod" ? "" : "-stage"
+  project_id                           = "structhub-412620"
+  project_number                       = "485124114765"
+  fe_service_name_prefix               = "xtract-fe"
+  indexer_service_name_prefix          = "xtract-indexer"
+  be_service_name_prefix               = "xtract-be"
+  fe_hc_path                           = "/health"
+  be_hc_path                           = "/tika"
+  fe_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
+  indexer_domain_suffix                = local.environment == "prod" ? "" : "-stage"
+  be_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
 
   region_instance_counts = {
     "northamerica-northeast1" = {
-      fe_max_inst = local.environment == "prod" ? 1000 : 1
-      fe_min_inst = 0
+      fe_max_inst      = local.environment == "prod" ? 1000 : 1
+      fe_min_inst      = 0
       indexer_max_inst = local.environment == "prod" ? 1000 : 1
       indexer_min_inst = 0
-      be_max_inst = local.environment == "prod" ? 1000 : 10
-      be_min_inst = 0
+      be_max_inst      = local.environment == "prod" ? 1000 : 10
+      be_min_inst      = 0
     }
     "northamerica-northeast2" = {
-      fe_max_inst = local.environment == "prod" ? 1000 : 1
-      fe_min_inst = 0
+      fe_max_inst      = local.environment == "prod" ? 1000 : 1
+      fe_min_inst      = 0
       indexer_max_inst = local.environment == "prod" ? 1000 : 1
       indexer_min_inst = 0
-      be_max_inst = local.environment == "prod" ? 1000 : 10
-      be_min_inst = 0
+      be_max_inst      = local.environment == "prod" ? 1000 : 10
+      be_min_inst      = 0
     }
     "us-central1" = {
-      fe_max_inst = 12000
-      fe_min_inst = 0
+      fe_max_inst      = 12000
+      fe_min_inst      = 0
       indexer_max_inst = 12000
       indexer_min_inst = 0
-      be_max_inst = 12000
-      be_min_inst = 0
+      be_max_inst      = 12000
+      be_min_inst      = 0
     }
     "us-south1" = {
-      fe_max_inst = 4000
-      fe_min_inst = 0
+      fe_max_inst      = 4000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 4000
-      be_min_inst = 0
+      be_max_inst      = 4000
+      be_min_inst      = 0
     }
     "us-east4" = {
-      fe_max_inst = 5000
-      fe_min_inst = 0
+      fe_max_inst      = 5000
+      fe_min_inst      = 0
       indexer_max_inst = 5000
       indexer_min_inst = 0
-      be_max_inst = 5000
-      be_min_inst = 0
+      be_max_inst      = 5000
+      be_min_inst      = 0
     }
     "us-east1" = {
-      fe_max_inst = 7000
-      fe_min_inst = 0
+      fe_max_inst      = 7000
+      fe_min_inst      = 0
       indexer_max_inst = 7000
       indexer_min_inst = 0
-      be_max_inst = 7000
-      be_min_inst = 0
+      be_max_inst      = 7000
+      be_min_inst      = 0
     }
     "us-east5" = {
-      fe_max_inst = 4000
-      fe_min_inst = 0
+      fe_max_inst      = 4000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 4000
-      be_min_inst = 0
+      be_max_inst      = 4000
+      be_min_inst      = 0
     }
     "us-west1" = {
-      fe_max_inst = 4500
-      fe_min_inst = 0
+      fe_max_inst      = 4500
+      fe_min_inst      = 0
       indexer_max_inst = 4500
       indexer_min_inst = 0
-      be_max_inst = 4500
-      be_min_inst = 0
+      be_max_inst      = 4500
+      be_min_inst      = 0
     }
     "us-west2" = {
-      fe_max_inst = 4500
-      fe_min_inst = 0
+      fe_max_inst      = 4500
+      fe_min_inst      = 0
       indexer_max_inst = 4500
       indexer_min_inst = 0
-      be_max_inst = 4500
-      be_min_inst = 0
+      be_max_inst      = 4500
+      be_min_inst      = 0
     }
     "us-west3" = {
-      fe_max_inst = 3000
-      fe_min_inst = 0
+      fe_max_inst      = 3000
+      fe_min_inst      = 0
       indexer_max_inst = 3000
       indexer_min_inst = 0
-      be_max_inst = 3000
-      be_min_inst = 0
+      be_max_inst      = 3000
+      be_min_inst      = 0
     }
     "us-west4" = {
-      fe_max_inst = 4000
-      fe_min_inst = 0
+      fe_max_inst      = 4000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 4000
-      be_min_inst = 0
+      be_max_inst      = 4000
+      be_min_inst      = 0
     }
     "asia-south1" = {
-      fe_max_inst = 4000
-      fe_min_inst = 0
+      fe_max_inst      = 4000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 4000
-      be_min_inst = 0
+      be_max_inst      = 4000
+      be_min_inst      = 0
     }
     "asia-south2" = {
-      fe_max_inst = 1000
-      fe_min_inst = 0
+      fe_max_inst      = 1000
+      fe_min_inst      = 0
       indexer_max_inst = 1000
       indexer_min_inst = 0
-      be_max_inst = 1000
-      be_min_inst = 0
+      be_max_inst      = 1000
+      be_min_inst      = 0
     }
     "asia-southeast1" = {
-      fe_max_inst = 4000
-      fe_min_inst = 0
+      fe_max_inst      = 4000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 4000
-      be_min_inst = 0
+      be_max_inst      = 4000
+      be_min_inst      = 0
     }
     "asia-east1" = {
-      fe_max_inst = 4000
-      fe_min_inst = 0
+      fe_max_inst      = 4000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 4000
-      be_min_inst = 0
+      be_max_inst      = 4000
+      be_min_inst      = 0
     }
     "asia-south2" = {
-      fe_max_inst = 1000
-      fe_min_inst = 0
+      fe_max_inst      = 1000
+      fe_min_inst      = 0
       indexer_max_inst = 4000
       indexer_min_inst = 0
-      be_max_inst = 1000
-      be_min_inst = 0
+      be_max_inst      = 1000
+      be_min_inst      = 0
     }
     "europe-west1" = {
-      fe_max_inst = 9000
-      fe_min_inst = 0
+      fe_max_inst      = 9000
+      fe_min_inst      = 0
       indexer_max_inst = 9000
       indexer_min_inst = 0
-      be_max_inst = 9000
-      be_min_inst = 0
+      be_max_inst      = 9000
+      be_min_inst      = 0
     }
     "europe-west2" = {
-      fe_max_inst = 5000
-      fe_min_inst = 0
+      fe_max_inst      = 5000
+      fe_min_inst      = 0
       indexer_max_inst = 5000
       indexer_min_inst = 0
-      be_max_inst = 5000
-      be_min_inst = 0
+      be_max_inst      = 5000
+      be_min_inst      = 0
     }
     "europe-west3" = {
-      fe_max_inst = 4500
-      fe_min_inst = 0
+      fe_max_inst      = 4500
+      fe_min_inst      = 0
       indexer_max_inst = 4500
       indexer_min_inst = 0
-      be_max_inst = 4500
-      be_min_inst = 0
+      be_max_inst      = 4500
+      be_min_inst      = 0
     }
     "europe-west4" = {
-      fe_max_inst = 5000
-      fe_min_inst = 0
+      fe_max_inst      = 5000
+      fe_min_inst      = 0
       indexer_max_inst = 5000
       indexer_min_inst = 0
-      be_max_inst = 5000
-      be_min_inst = 0
+      be_max_inst      = 5000
+      be_min_inst      = 0
     }
     "australia-southeast1" = {
-      fe_max_inst = 5000
-      fe_min_inst = 0
+      fe_max_inst      = 5000
+      fe_min_inst      = 0
       indexer_max_inst = 5000
       indexer_min_inst = 0
-      be_max_inst = 5000
-      be_min_inst = 0
+      be_max_inst      = 5000
+      be_min_inst      = 0
     }
   }
 }
@@ -257,7 +257,7 @@ resource "google_project_service" "run_api" {
 }
 
 resource "google_project_service" "storage_api" {
-  service                    ="storage.googleapis.com"
+  service                    = "storage.googleapis.com"
   disable_dependent_services = false
   disable_on_destroy         = false
 }
@@ -700,6 +700,12 @@ resource "google_project_iam_member" "indexer_eventreceiver" {
   role    = "roles/eventarc.eventReceiver"
   member  = "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
 }
+# Grant permission to receive Eventarc events
+resource "google_project_iam_member" "indexer_aiplatform" {
+  project = local.project_id
+  role    = "roles/aiplatform.admin"
+  member  = "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+}
 # Grant Pub/Sub Publisher role to the GCS service account
 resource "google_project_iam_member" "gcs_pubsubpublisher" {
   project = local.project_id
@@ -718,13 +724,19 @@ resource "google_pubsub_topic" "fileupload_event_topic" {
 }
 
 resource "google_storage_bucket" "fileupload_bucket" {
-  name     = "structhub-file-upload-bucket-${local.environment}"
-  location = "us"
+  name                        = "structhub-file-upload-bucket-${local.environment}"
+  location                    = "us"
   uniform_bucket_level_access = true
+  cors {
+    origin          = ["https://stage.structhub.io", "http://localhost:3000", "https://structhub.io"]
+    method          = ["GET", "HEAD", "PUT", "POST", "DELETE"]
+    response_header = ["*"]
+    max_age_seconds = 3600
+  }
 }
 
 resource "google_project_iam_member" "indexer_pubsubpublisher" {
-  project = local.project_id  
+  project = local.project_id
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
 }
@@ -749,7 +761,7 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
       max_instance_count = local.region_instance_counts[each.key].indexer_max_inst
       min_instance_count = local.region_instance_counts[each.key].indexer_min_inst
     }
-    
+
     containers {
       ports {
         container_port = local.indexer_port
@@ -789,6 +801,60 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
           }
         }
       }
+
+      env {
+        name = "PSQL_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_USERNAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_DATABASE"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
       env {
         name = "SECRET_KEY"
         value_source {
@@ -807,6 +873,7 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
           }
         }
       }
+
       env {
         name = "PINECONE_API_KEY"
         value_source {
@@ -863,7 +930,7 @@ resource "google_eventarc_trigger" "fileupload_trigger" {
     attribute = "bucket"
     value     = google_storage_bucket.fileupload_bucket.name
   }
-  
+
   service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
 
   destination {
@@ -872,11 +939,11 @@ resource "google_eventarc_trigger" "fileupload_trigger" {
       region  = each.key
     }
   }
-  depends_on = [ 
+  depends_on = [
     google_storage_bucket.fileupload_bucket,
     google_pubsub_topic.fileupload_event_topic,
     google_cloud_run_v2_service.indexer_cloud_run
-   ]
+  ]
 }
 
 module "gcloud_pubsub_ack_deadline" {
@@ -888,7 +955,7 @@ module "gcloud_pubsub_ack_deadline" {
   platform = "linux"
 
   create_cmd_entrypoint  = "gcloud"
-  create_cmd_body        = "pubsub subscriptions update ${google_eventarc_trigger.fileupload_trigger[each.key].transport[0].pubsub[0].subscription} --ack-deadline 600 --min-retry-delay=10s --max-retry-delay=60s"
+  create_cmd_body        = "pubsub subscriptions update ${google_eventarc_trigger.fileupload_trigger[each.key].transport[0].pubsub[0].subscription} --ack-deadline 600 --min-retry-delay=590s --max-retry-delay=600s"
   destroy_cmd_entrypoint = "gcloud"
-  destroy_cmd_body       = "pubsub subscriptions update ${google_eventarc_trigger.fileupload_trigger[each.key].transport[0].pubsub[0].subscription} --ack-deadline 600 --min-retry-delay=10s --max-retry-delay=60s"
+  destroy_cmd_body       = "pubsub subscriptions update ${google_eventarc_trigger.fileupload_trigger[each.key].transport[0].pubsub[0].subscription} --ack-deadline 600 --min-retry-delay=590s --max-retry-delay=600s"
 }
