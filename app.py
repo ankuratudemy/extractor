@@ -3,6 +3,12 @@ import io
 from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
+from langchain.prompts import PromptTemplate
+from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain_core.documents import Document
+from pinecone import Pinecone, ServerlessSpec
+from vertexai.preview.language_models import TextEmbeddingModel
+import json
 from shared import file_processor, google_auth, security, google_pub_sub
 from types import FrameType
 import json
@@ -28,12 +34,14 @@ REDIS_HOST = os.environ.get('REDIS_HOST')
 REDIS_PORT = os.environ.get('REDIS_PORT')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 SECRET_KEY = os.environ.get('SECRET_KEY')
-
+PINECONE_API_KEY= os.environ.get('PINECONE_API_KEY')
+PINECONE_INDEX_NAME= os.environ.get('PINECONE_INDEX_NAME')
 #Other env specific varibales:
 
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 GCP_CREDIT_USAGE_TOPIC = os.environ.get('GCP_CREDIT_USAGE_TOPIC')
 UPLOADS_FOLDER = os.environ.get('UPLOADS_FOLDER')
+
 
 def verify_api_key():
     api_key_header = request.headers.get('API-KEY')
@@ -43,7 +51,8 @@ def verify_api_key():
 
 @app.before_request
 def before_request():
-    if request.endpoint == 'extract':  # Check if the request is for the /extract route
+    log.info(f"request.endpoint {request.endpoint}")
+    if request.endpoint == 'extract' or request.endpoint == 'search':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
@@ -82,7 +91,7 @@ def health_check():
 
 @app.route('/extract', methods=['POST'])
 @limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
-def extract_text():
+def extract():
     lang_value = request.form.get('lang', '')
     ocr_value = request.form.get('ocr', '')
     out = request.form.get('out_format', '')
@@ -124,7 +133,7 @@ def extract_text():
 
     # Access a specific header
     content_type_header = request.headers.get('Content-Type')
-    print(f"\nContent-Type Header: {content_type_header}")
+    log.info(f"\nContent-Type Header: {content_type_header}")
 
     contentType='application/pdf'
     uploaded_file = request.files['file']
@@ -134,7 +143,7 @@ def extract_text():
         # Save the uploaded file to a temporary location
         filename = secure_filename(uploaded_file.filename)
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        print(uploaded_file.content_type)
+        log.info(uploaded_file.content_type)
         
         oFileExtMap = {
             "application/octet-stream": "use_extension", # use file extension if content type is octet-stream
@@ -206,7 +215,7 @@ def extract_text():
         reverse_file_ext_map = {v: k for k, v in oFileExtMap.items()}
 
         if uploaded_file.content_type not in oFileExtMap:
-            print('Invalid file extension')
+            log.info('Invalid file extension')
             return 'Unsupported file format.', 400
         
         file_extension = oFileExtMap[ uploaded_file.content_type ]
@@ -293,6 +302,7 @@ def extract_text():
         #send CREDIT USAGE TO TOPIC 'structhub-credit-usage'
 
         #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
         "creditsUsed": num_pages
@@ -389,14 +399,86 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
     # If retries are exhausted, raise an exception or handle it as needed
     raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
 
+@app.route('/search', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
+def search():
+    try:
+        userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        log.info(f"user_id {userId}")
+        if not userId:
+            return 'invalid request', 400
+    
+        # Check if request body contains the required parameters
+        if not request.is_json:
+            return 'invalid request', 400
+        
+        data = request.get_json()
+        log.info(data)
+        if 'topk' not in data or 'query' not in data:
+            missing_params = []
+            if 'topk' not in data:
+                missing_params.append('topk')
+            if 'query' not in data:
+                missing_params.append('query')
+            return f"Missing required parameters: {', '.join(missing_params)}", 400
+        
+        topk = data['topk']
+        query = data['query']
+        log.info(f"query: {query} topK: {topk}")
+    except Exception as e:
+        log.info(str(e))
+        return 'validation: Something went wrong', 500
+    
+    try:
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        index = pc.Index(PINECONE_INDEX_NAME)
+    except Exception as e:
+        log.info(str(e))
+        return 'vectorDB: Something went wrong', 500
 
+    try:
+        #Get google embeddings:
+        embeddings = asyncio.run(get_google_embedding(queries=[query]))
+    except Exception as e:
+        log.error(str(e))
+        return 'vectorDB Search: Something went wrong', 500
+
+    try:
+        # Search Vector DB
+        docs = index.query(
+            namespace=str(userId),
+            vector=embeddings[0],
+            top_k=topk,
+            include_values=False,
+            include_metadata=True,
+            # filter={
+            #     "genre": {"$in": ["comedy", "documentary", "drama"]}
+            # }
+        )
+        log.info(f"Docs: {docs.to_dict()}")
+        doc_list = [{'source': match['metadata']['source'], 'page': match['metadata']['page'], 'text': match['metadata']['text']} for match in docs.to_dict()['matches']]
+        count = len(doc_list)
+        final_response = {
+            'count': count,
+            'data': doc_list
+        }
+        json_string = json.dumps(final_response, indent=4)
+        return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'} 
+    except Exception as e:
+        log.error(str(e))
+        return 'Query index: Something went wrong', 500
+
+async def get_google_embedding(queries):
+    embedder_name = "text-multilingual-embedding-preview-0409"
+    model = TextEmbeddingModel.from_pretrained(embedder_name)
+    embeddings_list = model.get_embeddings(queries)
+    embeddings = [embedding.values for embedding in embeddings_list]
+    return embeddings
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:
     log.info(f"Caught Signal {signal.strsignal(signal_int)}")
 
     # Safely exit program
     sys.exit(0)
-
-
 if __name__ == "__main__":
     # Running application locally, outside of a Google Cloud Environment
 

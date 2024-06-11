@@ -423,7 +423,8 @@ async def create_and_upload_embeddings_in_batches(results, filename, userid,  ba
                 document_id = f"{formatted_filename}#{page_num}"
                 metadata = {
                     "text": text,
-                    "source": filename
+                    "source": filename,
+                    "page": page_num
                 }
                 batch.append({
                     "id": document_id,
@@ -443,7 +444,8 @@ async def create_and_upload_embeddings_in_batches(results, filename, userid,  ba
             document_id = f"{formatted_filename}#{page_num}"
             metadata = {
                 "text": text,
-                "source": filename
+                "source": filename,
+                "page": page_num
             }
             batch.append({
                 "id": document_id,

@@ -18,5 +18,11 @@ Flask-Limiter[redis]
 flask_httpauth
 google-cloud-pubsub
 google-cloud-storage
+google-cloud-aiplatform
+openai
 pyarmor
 cython
+pinecone-client==4.1.1
+langchain-core
+langchain-community
+langchain
