@@ -23,12 +23,14 @@ locals {
   indexer_cpu                          = 1
   indexer_memory                       = "2Gi"
   indexer_port                         = 5000
+  searxng_port                         = 8080
   external_ip_address_name_fe          = "xtract-fe-ip-name"
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-95.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-103.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:21.0.0"
+  websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -42,6 +44,7 @@ locals {
   fe_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   indexer_domain_suffix                = local.environment == "prod" ? "" : "-stage"
   be_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
+  websearch_domain_suffix              = local.environment == "prod" ? "" : "-stage"
 
   region_instance_counts = {
     "northamerica-northeast1" = {
@@ -403,7 +406,6 @@ resource "google_compute_region_network_endpoint_group" "be_backend" {
 }
 resource "google_cloud_run_v2_service" "fe_cloud_run" {
   for_each = toset(local.regions)
-
   name     = "${local.fe_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
   location = each.key
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
@@ -429,6 +431,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
       env {
         name  = "SERVER_URL"
         value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+      }
+      env {
+        name  = "WEBSEARCH_SERVER_URL"
+        value = local.environment == "prod" ? "websearch.structhub.io" : "stage-websearch.structhub.io"
       }
       env {
         name  = "GCP_PROJECT_ID"
@@ -976,4 +982,119 @@ module "gcloud_pubsub_ack_deadline" {
   create_cmd_body        = "pubsub subscriptions update ${google_eventarc_trigger.fileupload_trigger[each.key].transport[0].pubsub[0].subscription} --ack-deadline 600 --min-retry-delay=590s --max-retry-delay=600s"
   destroy_cmd_entrypoint = "gcloud"
   destroy_cmd_body       = "pubsub subscriptions update ${google_eventarc_trigger.fileupload_trigger[each.key].transport[0].pubsub[0].subscription} --ack-deadline 600 --min-retry-delay=590s --max-retry-delay=600s"
+}
+
+## Searxng Cloud run externally hosted accessible via fe_backend
+resource "google_cloud_run_service_iam_binding" "websearch_iam_binding" {
+  for_each = toset(local.regions)
+
+  location = each.key
+  service  = google_cloud_run_v2_service.websearch_cloud_run[each.key].name
+  role     = "roles/run.invoker"
+  members = [
+    "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
+  ]
+}
+
+resource "google_cloud_run_v2_service" "websearch_cloud_run" {
+  for_each = toset(local.regions)
+
+  name     = "websearch${local.websearch_domain_suffix}-${each.key}"
+  location = each.key
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  template {
+    scaling {
+      max_instance_count = local.region_instance_counts[each.key].fe_max_inst
+      min_instance_count = local.region_instance_counts[each.key].fe_min_inst
+    }
+
+    containers {
+      ports {
+        container_port = local.searxng_port # Example port, update as necessary
+      }
+      image = local.websearch_image # Update with your websearch image
+      resources {
+        limits = {
+          cpu    = local.fe_cpu
+          memory = local.fe_memory
+        }
+      }
+    }
+    timeout                          = "690s"
+    max_instance_request_concurrency = local.fe_concurrent_requests_per_inst
+  }
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+  custom_audiences = [local.environment == "prod" ? "websearch.structhub.io" : "stage-websearch.structhub.io"]
+  depends_on = [
+    google_project_service.run_api
+  ]
+}
+
+resource "google_compute_global_address" "websearch_external_ip" {
+  name = "websearch${local.websearch_domain_suffix}-ip"
+}
+
+resource "google_compute_backend_service" "websearch_backend" {
+  name                            = "websearch${local.websearch_domain_suffix}-backend"
+  load_balancing_scheme           = "EXTERNAL_MANAGED"
+  connection_draining_timeout_sec = 310
+  locality_lb_policy              = "RANDOM"
+  enable_cdn                      = false
+
+  dynamic "backend" {
+    for_each = local.regions
+
+    content {
+      group = google_compute_region_network_endpoint_group.websearch_backend[backend.key].id
+    }
+  }
+
+  depends_on = [
+    google_project_service.compute_api,
+  ]
+}
+
+resource "google_compute_managed_ssl_certificate" "websearch_ssl_cert" {
+  name = "websearch${local.websearch_domain_suffix}-cert"
+  managed {
+    domains = [local.environment == "prod" ? "websearch.structhub.io" : "stage-websearch.structhub.io"]
+  }
+}
+
+resource "google_compute_target_https_proxy" "websearch_https_proxy" {
+  name                        = "websearch${local.websearch_domain_suffix}-https"
+  ssl_certificates            = [google_compute_managed_ssl_certificate.websearch_ssl_cert.id]
+  url_map                     = google_compute_url_map.websearch_url_map.id
+  http_keep_alive_timeout_sec = 610
+
+  depends_on = [
+    google_compute_managed_ssl_certificate.websearch_ssl_cert
+  ]
+}
+
+resource "google_compute_url_map" "websearch_url_map" {
+  name            = "websearch${local.websearch_domain_suffix}"
+  default_service = google_compute_backend_service.websearch_backend.id
+}
+
+resource "google_compute_global_forwarding_rule" "websearch_forwarding_rule" {
+  name                  = "websearch${local.websearch_domain_suffix}-https"
+  target                = google_compute_target_https_proxy.websearch_https_proxy.id
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  ip_address            = google_compute_global_address.websearch_external_ip.id
+  port_range            = "443"
+  depends_on            = [google_compute_target_https_proxy.websearch_https_proxy]
+}
+
+resource "google_compute_region_network_endpoint_group" "websearch_backend" {
+  count                 = length(local.regions)
+  name                  = "websearch${local.websearch_domain_suffix}-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = local.regions[count.index]
+  cloud_run {
+    service = google_cloud_run_v2_service.websearch_cloud_run[local.regions[count.index]].name
+  }
 }

@@ -16,6 +16,7 @@ google-auth-httplib2
 redis 
 Flask-Limiter[redis]
 flask_httpauth
+flask-cors
 google-cloud-pubsub
 google-cloud-storage
 google-cloud-aiplatform

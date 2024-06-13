@@ -1,6 +1,7 @@
 import os
 import io
 from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
+from flask_cors import CORS
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
 from langchain.prompts import PromptTemplate
@@ -8,6 +9,7 @@ from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.documents import Document
 from pinecone import Pinecone, ServerlessSpec
 from vertexai.preview.language_models import TextEmbeddingModel
+from urllib.parse import urlencode
 import json
 from shared import file_processor, google_auth, security, google_pub_sub
 from types import FrameType
@@ -27,6 +29,7 @@ import signal
 sys.path.append('../')
 from shared.logging_config import log
 app = Flask(__name__)
+CORS(app, origins="*")
 app.debug=True
 
 # Assuming you have Redis connection details
@@ -52,7 +55,7 @@ def verify_api_key():
 @app.before_request
 def before_request():
     log.info(f"request.endpoint {request.endpoint}")
-    if request.endpoint == 'extract' or request.endpoint == 'search':  # Check if the request is for the /extract route
+    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
@@ -72,10 +75,12 @@ limiter = Limiter(
 
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 SERVER_URL = f"https://{os.environ.get('SERVER_URL')}/tika"
+WEBSEARCH_SERVER_URL = f"https://{os.environ.get('WEBSEARCH_SERVER_URL')}/search"
 
 
 # Create the ID token
 bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
+websearch_bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('WEBSEARCH_SERVER_URL')).json()['token']
 
 def get_event_loop():
     try:
@@ -223,8 +228,8 @@ def extract():
         if file_extension == 'use_extension':
             file_extension = os.path.splitext(filename)[1][1:].lower()
 
-        print(file_extension)
-        print(filename)
+        log.info(file_extension)
+        log.info(filename)
 
         if file_extension == 'pdf':
             # Read the PDF file directly from memory
@@ -373,7 +378,7 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
             payload_copy = io.BytesIO(payload.getvalue())
             async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=300)) as response:
                 if response.status == 429:
-                    print(f"Retrying request for page {page_num}, Retry #{retries + 1}")
+                    log.info(f"Retrying request for page {page_num}, Retry #{retries + 1}")
                     retries += 1
                     await asyncio.sleep(1)  # You may adjust the sleep duration
                     continue  # Retry the request
@@ -382,22 +387,23 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
                 return text_content, page_num
 
         except aiohttp.ClientError as e:
-            print(f"Error during request for page {page_num}: {str(e)}")
+            log.info(f"Error during request for page {page_num}: {str(e)}")
             retries += 1
             await asyncio.sleep(1)  # You may adjust the sleep duration
 
         except ssl.SSLError as e:
-            print(f"SSL Error during request for page {page_num}: {str(e)}")
+            log.info(f"SSL Error during request for page {page_num}: {str(e)}")
             retries += 1
             await asyncio.sleep(1)  # You may adjust the sleep duration
 
         except asyncio.TimeoutError:
-            print(f"Timeout error during request for page {page_num}. Retrying...")
+            log.info(f"Timeout error during request for page {page_num}. Retrying...")
             retries += 1
             await asyncio.sleep(1)  # Adjust the sleep duration
 
     # If retries are exhausted, raise an exception or handle it as needed
     raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
+
 
 @app.route('/search', methods=['POST'])
 @limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
@@ -468,6 +474,107 @@ def search():
         log.error(str(e))
         return 'Query index: Something went wrong', 500
 
+async def async_get_request(session, url, params, headers=None, max_retries=10):
+    retries = 0
+    query_string = urlencode(params)
+
+    while retries < max_retries:
+        try:
+            async with session.get(f"{url}?{query_string}", headers=headers, timeout=aiohttp.ClientTimeout(total=300)) as response:
+                log.info(f"Request URL: {url}?{query_string}")
+                log.info(f"Response status: {response.status}")
+                log.info(f"Response headers: {response.headers}")
+                
+                if response.status == 429:
+                    log.info(f"Retrying websearch request, Retry #{retries + 1}")
+                    retries += 1
+                    await asyncio.sleep(1)  # You may adjust the sleep duration
+                    continue  # Retry the request
+                
+                content = await response.read()  # Read the content of the response
+                log.info(f"Response content: {content}")
+                
+                try:
+                    json_content = json.loads(content)
+                except json.JSONDecodeError:
+                    log.error(f"Failed to decode JSON response: {content}")
+                    raise RuntimeError("Invalid JSON response")
+                
+                return json_content, params.get('pageno', 1)
+
+        except aiohttp.ClientError as e:
+            log.info(f"Error during websearch: {str(e)}")
+            retries += 1
+            await asyncio.sleep(1)  # You may adjust the sleep duration
+
+        except ssl.SSLError as e:
+            log.info(f"SSL Error during websearch: {str(e)}")
+            retries += 1
+            await asyncio.sleep(1)  # You may adjust the sleep duration
+
+        except asyncio.TimeoutError:
+            log.info(f"Timeout error during websearch. Retrying...")
+            retries += 1
+            await asyncio.sleep(1)  # Adjust the sleep duration
+
+    # If retries are exhausted, raise an exception or handle it as needed
+    raise RuntimeError(f"Failed after {max_retries} retries for websearch")
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    try:
+        userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        log.info(f"user_id {userId}")
+        if not userId:
+            return 'invalid request', 400
+        
+        if not request.is_json:
+            return 'invalid request', 400
+        
+        data = request.get_json()
+        log.info(data)
+        headers = {}
+        headers['Authorization'] = f'Bearer {websearch_bearer_token}'
+        required_params = ['q', 'format', 'time_range', 'count']
+        missing_params = [param for param in required_params if param not in data]
+        if missing_params:
+            return f"Missing required parameters: {', '.join(missing_params)}", 400
+
+        query = data['q']
+        count = data['count']
+        params = {param: data[param] for param in required_params}
+        params['pageno'] = 1  # Initialize page number
+        log.info(f"params: {params}")
+
+    except Exception as e:
+        log.error(str(e))
+        return 'validation: Something went wrong', 500
+    
+    try:
+        total_results = []
+        total_count = 0
+
+        async def fetch_results():
+            async with aiohttp.ClientSession() as session:
+                nonlocal total_results, total_count
+                while total_count < count:
+                    result, pageno = await async_get_request(session, WEBSEARCH_SERVER_URL, params, headers)
+                    results = result.get('results', [])
+                    if not results:
+                        break
+                    total_results.extend(results)
+                    total_count = len(total_results)
+                    log.info(f"Total results fetched: {total_count}")
+                    params['pageno'] = pageno + 1  # Increment page number
+
+        asyncio.run(fetch_results())
+        final_results = total_results[:count]
+        json_string = json.dumps(final_results, indent=4)
+        return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
+    except Exception as e:
+        log.error(str(e))
+        return 'Websearch call: Something went wrong', 500
+    
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
     model = TextEmbeddingModel.from_pretrained(embedder_name)
