@@ -23,7 +23,13 @@ google-cloud-aiplatform
 openai
 pyarmor
 cython
-pinecone-client==4.1.1
+pinecone-client==3.0.0
 langchain-core
 langchain-community
 langchain
+langchainhub
+langchain-openai
+langchain-pinecone==0.0.3
+bs4
+langchain-google-vertexai
+

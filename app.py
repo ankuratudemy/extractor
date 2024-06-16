@@ -1,28 +1,34 @@
 import os
 import io
-from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
+import re
+from openai import OpenAI
+from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response, stream_with_context
 from flask_cors import CORS
 from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
-from langchain.prompts import PromptTemplate
+from langchain.chains import qa_with_sources
+from langchain_pinecone import Pinecone
+from pinecone import Pinecone as PC
+from langchain_core.prompts import PromptTemplate
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.documents import Document
-from pinecone import Pinecone, ServerlessSpec
+from langchain_openai import ChatOpenAI
+from langchain_google_vertexai import VertexAIEmbeddings
+from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain.callbacks.streaming_stdout_final_only import (
+    FinalStreamingStdOutCallbackHandler,
+)
+callbacks = [FinalStreamingStdOutCallbackHandler()]
 from vertexai.preview.language_models import TextEmbeddingModel
 from urllib.parse import urlencode
 import json
 from shared import file_processor, google_auth, security, google_pub_sub
 from types import FrameType
 import json
-import concurrent.futures
-import multiprocessing
 import time
 import sys
-import tempfile
-import requests
 import aiohttp
 import asyncio
-import threading
 import ssl
 import signal
 
@@ -55,7 +61,7 @@ def verify_api_key():
 @app.before_request
 def before_request():
     log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
+    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
@@ -89,6 +95,7 @@ def get_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop
+
 
 @app.route('/health', methods=['GET'], endpoint='health_check')
 def health_check():
@@ -251,7 +258,7 @@ def extract():
             num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
 
-        elif file_extension in ['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp']:
+        elif file_extension in ['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp', 'html']:
             pages = [("1", io.BytesIO(uploaded_file.read()))]
             num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
@@ -261,7 +268,7 @@ def extract():
             num_pages = len(pages)
             contentType = reverse_file_ext_map.get(file_extension, '')
 
-        elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'html', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
+        elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
             uploaded_file.save(temp_file_path)
             # Convert the file to PDF using LibreOffice
             pdf_data = convert_to_pdf(temp_file_path, file_extension)
@@ -430,14 +437,14 @@ def search():
         
         topk = data['topk']
         query = data['query']
-        log.info(f"query: {query} topK: {topk}")
+        log.info(f"query: {query} topk: {topk}")
     except Exception as e:
         log.info(str(e))
         return 'validation: Something went wrong', 500
     
     try:
-        pc = Pinecone(api_key=PINECONE_API_KEY)
-        index = pc.Index(PINECONE_INDEX_NAME)
+        pc = PC(api_key=PINECONE_API_KEY)
+        index = pc.Index(name=PINECONE_INDEX_NAME)
     except Exception as e:
         log.info(str(e))
         return 'vectorDB: Something went wrong', 500
@@ -469,6 +476,16 @@ def search():
             'data': doc_list
         }
         json_string = json.dumps(final_response, indent=4)
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": count * 0.1
+        })
+        log.info(f"Number of pages processed: {count}")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'} 
     except Exception as e:
         log.error(str(e))
@@ -520,8 +537,8 @@ async def async_get_request(session, url, params, headers=None, max_retries=10):
     # If retries are exhausted, raise an exception or handle it as needed
     raise RuntimeError(f"Failed after {max_retries} retries for websearch")
 
-@app.route('/chat', methods=['POST'])
-def chat():
+@app.route('/serp', methods=['POST'])
+def serp():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
         log.info(f"user_id {userId}")
@@ -570,11 +587,560 @@ def chat():
         asyncio.run(fetch_results())
         final_results = total_results[:count]
         json_string = json.dumps(final_results, indent=4)
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": count * 0.2
+        })
+        log.info(f"Number of pages processed: {count}")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
     except Exception as e:
         log.error(str(e))
         return 'Websearch call: Something went wrong', 500
+
+@app.route('/webextract', methods=['POST'])
+def webextract():
+    try:
+        userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        log.info(f"user_id {userId}")
+        if not userId:
+            return 'invalid request', 400
+        
+        if not request.is_json:
+            return 'invalid request', 400
+        
+        data = request.get_json()
+        log.info(data)
+        headers = {}
+        headers['Authorization'] = f'Bearer {websearch_bearer_token}'
+        required_params = ['q', 'time_range', 'count']
+        missing_params = [param for param in required_params if param not in data]
+        if missing_params:
+            return f"Missing required parameters: {', '.join(missing_params)}", 400
+        query = data['q']
+        count = data['count']
+        params = {param: data[param] for param in required_params}
+        params['pageno'] = 1  # Initialize page number
+        params['format'] = 'json' # set output format as json
+        log.info(f"params: {params}")
+
+    except Exception as e:
+        log.error(str(e))
+        return 'validation: Something went wrong', 500
     
+    try:
+        total_results = []
+        total_count = 0
+        processed_urls = set()
+
+        async def fetch_results():
+            async with aiohttp.ClientSession() as session:
+                nonlocal total_results, total_count
+                while total_count < count:
+                    result, pageno = await async_get_request(session, WEBSEARCH_SERVER_URL, params, headers)
+                    results = result.get('results', [])
+                    if not results:
+                        break
+                    for item in results:
+                        if item['url'] not in processed_urls:
+                            processed_urls.add(item['url'])
+                            total_results.append(item)
+                            total_count += 1
+                            if total_count >= count:
+                                break
+                    params['pageno'] = pageno + 1  # Increment page number
+
+        asyncio.run(fetch_results())
+        final_results = total_results[:count]
+
+        # Fetch HTML content and extract text for each URL
+        async def fetch_and_extract(url, title, headers):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    html_content = await response.read()
+                    payload = io.BytesIO(html_content)
+                    extract_headers = {
+                        'Content-Type': 'text/html',
+                        'Accept': 'text/plain',
+                        'Authorization': f'Bearer {bearer_token}'
+                    }
+                    text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
+                    return text
+
+        loop = get_event_loop()
+        tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
+        extracted_texts = loop.run_until_complete(asyncio.gather(*tasks))
+
+        json_output = []
+        for text, item in zip(extracted_texts, final_results):
+            page_obj = {
+                'url': item['url'],
+                'title': item['title'],
+                'text': text.strip()
+            }
+            json_output.append(page_obj)
+
+        json_string = json.dumps(json_output, indent=4)
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": count
+        })
+        log.info(f"Number of pages processed: {count}")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+        return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
+
+    except Exception as e:
+        log.error(str(e))
+        return 'Websearch call: Something went wrong', 500
+    
+async def getVectorStoreDocs(request):
+    try:
+        userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        log.info(f"user_id {userId}")
+        if not userId:
+            raise Exception("invalid request")
+    
+        # Check if request body contains the required parameters
+        if not request.is_json:
+            raise Exception("invalid request")
+        
+        data = request.get_json()
+        log.info(data)
+        if 'topk' not in data or 'q' not in data:
+            missing_params = []
+            if 'topk' not in data:
+                missing_params.append('topk')
+            if 'q' not in data:
+                missing_params.append('q')
+            return f"Missing required parameters: {', '.join(missing_params)}", 400
+        
+        topk = data['topk']
+        query = data['q']
+        log.info(f"query: {query} topk: {topk}")
+    except Exception as e:
+        log.info(str(e))
+        raise Exception(str(e))
+    
+    try:
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        index = pc.Index(PINECONE_INDEX_NAME)
+    except Exception as e:
+        log.info(str(e))
+        raise Exception(str(e))
+
+    try:
+        #Get google embeddings:
+        embeddings = asyncio.run(get_google_embedding(queries=[query]))
+    except Exception as e:
+        log.error(str(e))
+        raise Exception(str(e))
+
+    try:
+        # Search Vector DB
+        docs = index.query(
+            namespace=str(userId),
+            vector=embeddings[0],
+            top_k=topk,
+            include_values=False,
+            include_metadata=True,
+            # filter={
+            #     "genre": {"$in": ["comedy", "documentary", "drama"]}
+            # }
+        )
+        log.info(f"Docs: {docs.to_dict()}")
+        doc_list = [{'source': match['metadata']['source'], 'page': match['metadata']['page'], 'text': match['metadata']['text']} for match in docs.to_dict()['matches']]
+        count = len(doc_list)
+        final_response = {
+            'count': count,
+            'data': doc_list
+        }
+        json_string = json.dumps(final_response, indent=4)
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": count * 0.1
+        })
+        log.info(f"Number of pages processed: {count}")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+        return json_string
+    except Exception as e:
+        log.error(str(e))
+        raise Exception(str(e))
+
+async def getWebExtract(request):
+    try:
+        userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        log.info(f"user_id {userId}")
+        if not userId:
+            raise Exception("invalid request")
+        
+        if not request.is_json:
+            raise Exception("invalid request")
+        
+        data = request.get_json()
+        log.info(data)
+        headers = {}
+        headers['Authorization'] = f'Bearer {websearch_bearer_token}'
+        required_params = ['q', 'time_range', 'count']
+        missing_params = [param for param in required_params if param not in data]
+        if missing_params:
+            return f"Missing required parameters: {', '.join(missing_params)}", 400
+        query = data['q']
+        count = data['count']
+        params = {param: data[param] for param in required_params}
+        params['pageno'] = 1  # Initialize page number
+        params['format'] = 'json' # set output format as json
+        log.info(f"params: {params}")
+
+    except Exception as e:
+        log.error(str(e))
+        raise Exception(str(e))
+    
+    try:
+        total_results = []
+        total_count = 0
+        processed_urls = set()
+
+        async def fetch_results():
+            async with aiohttp.ClientSession() as session:
+                nonlocal total_results, total_count
+                while total_count < count:
+                    result, pageno = await async_get_request(session, WEBSEARCH_SERVER_URL, params, headers)
+                    results = result.get('results', [])
+                    if not results:
+                        break
+                    for item in results:
+                        if item['url'] not in processed_urls:
+                            processed_urls.add(item['url'])
+                            total_results.append(item)
+                            total_count += 1
+                            if total_count >= count:
+                                break
+                    params['pageno'] = pageno + 1  # Increment page number
+
+        await fetch_results()
+        final_results = total_results[:count]
+
+        # Fetch HTML content and extract text for each URL
+        async def fetch_and_extract(url, title, headers):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    html_content = await response.read()
+                    payload = io.BytesIO(html_content)
+                    extract_headers = {
+                        'Content-Type': 'text/html',
+                        'Accept': 'text/plain',
+                        'Authorization': f'Bearer {bearer_token}'
+                    }
+                    text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
+                    # Replace consecutive newlines and tabs
+                    text = re.sub(r'\n+', '\n', text)
+                    text = re.sub(r'\t+', '\t', text)
+                    text = re.sub(r'\\n', '', text)
+                    return text
+
+        loop = asyncio.get_event_loop()
+        tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
+        extracted_texts = await asyncio.gather(*tasks)
+
+        json_output = []
+        for text, item in zip(extracted_texts, final_results):
+            page_obj = {
+                'url': item['url'],
+                'title': item['title'],
+                'text': text.strip()
+            }
+            json_output.append(page_obj)
+
+        json_string = json.dumps(json_output, indent=4)
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": count
+        })
+        log.info(f"Number of pages processed: {count}")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+        return json_string
+
+    except Exception as e:
+        log.error(str(e))
+        raise Exception(str(e))
+
+async def getWebExtractLCFormat(request):
+    try:
+        userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        log.info(f"user_id {userId}")
+        if not userId:
+            raise Exception("invalid request")
+        
+        if not request.is_json:
+            raise Exception("invalid request")
+        
+        data = request.get_json()
+        log.info(data)
+        headers = {}
+        headers['Authorization'] = f'Bearer {websearch_bearer_token}'
+        required_params = ['q', 'time_range', 'count']
+        missing_params = [param for param in required_params if param not in data]
+        if missing_params:
+            return f"Missing required parameters: {', '.join(missing_params)}", 400
+        query = data['q']
+        count = data['count']
+        params = {param: data[param] for param in required_params}
+        params['pageno'] = 1  # Initialize page number
+        params['format'] = 'json' # set output format as json
+        log.info(f"params: {params}")
+
+    except Exception as e:
+        log.error(str(e))
+        raise Exception(str(e))
+    
+    try:
+        total_results = []
+        total_count = 0
+        processed_urls = set()
+
+        async def fetch_results():
+            async with aiohttp.ClientSession() as session:
+                nonlocal total_results, total_count
+                while total_count < count:
+                    result, pageno = await async_get_request(session, WEBSEARCH_SERVER_URL, params, headers)
+                    results = result.get('results', [])
+                    if not results:
+                        break
+                    for item in results:
+                        if item['url'] not in processed_urls:
+                            processed_urls.add(item['url'])
+                            total_results.append(item)
+                            total_count += 1
+                            if total_count >= count:
+                                break
+                    params['pageno'] = pageno + 1  # Increment page number
+
+        await fetch_results()
+        final_results = total_results[:count]
+
+        # Fetch HTML content and extract text for each URL
+        async def fetch_and_extract(url, title, headers):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    html_content = await response.read()
+                    payload = io.BytesIO(html_content)
+                    extract_headers = {
+                        'Content-Type': 'text/html',
+                        'Accept': 'text/plain',
+                        'Authorization': f'Bearer {bearer_token}'
+                    }
+                    text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
+                    # Replace consecutive newlines and tabs
+                    text = re.sub(r'\n+', '\n', text)
+                    text = re.sub(r'\t+', '\t', text)
+                    text = re.sub(r'\\n', '', text)
+                    return text
+
+        loop = asyncio.get_event_loop()
+        tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
+        extracted_texts = await asyncio.gather(*tasks)
+
+        document_out = []
+        for text, item in zip(extracted_texts, final_results):
+            page_obj = Document(
+                page_content=text.strip(),
+                metadata={'source': item['url'],
+                'page': item['title']}
+            )
+            document_out.append(page_obj)
+
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "creditsUsed": count
+        })
+        log.info(f"Number of pages processed: {count}")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+        return document_out
+
+    except Exception as e:
+        log.error(str(e))
+        raise Exception(str(e))
+
+
+def split_prompt(prompt, max_tokens=20000):
+    """Splits the prompt into chunks that fit within the max token limit."""
+    words = prompt.split()
+    chunks = []
+    current_chunk = []
+
+    for word in words:
+        if len(' '.join(current_chunk + [word])) <= max_tokens:
+            current_chunk.append(word)
+        else:
+            chunks.append(' '.join(current_chunk))
+            current_chunk = [word]
+
+    if current_chunk:
+        chunks.append(' '.join(current_chunk))
+
+    return chunks
+
+def chat_gpt_helper(client, prompt):
+    """This function returns the response from OpenAI's Gpt-4 turbo model using the completions API."""
+    try:
+        resp = ''
+        prompt_chunks = split_prompt(prompt)
+
+        for chunk in prompt_chunks:
+            for response_chunk in client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": chunk}],
+                    max_tokens=4096,
+                    n=1,
+                    stop=None,
+                    temperature=0,
+                    stream=True  # Enable streaming
+                ):
+                content = response_chunk.choices[0].delta.content
+                if content is not None:
+                    yield content
+
+    except Exception as e:
+        log.info(e)
+        yield str(e)
+    
+@app.route('/chat', methods=['POST'])
+def chat():
+    try:
+        loop = asyncio.new_event_loop()
+        docData = loop.run_until_complete(getVectorStoreDocs(request))
+        webData = loop.run_until_complete(getWebExtract(request))
+        
+        # Prepare the prompt
+        data = request.get_json()
+        query = data['q']
+        openai_key = data['openaiKey']
+        prompt = f"For this query: \n\n{query}, provide a detailed, accurate, and helpful answer based on the following data:\n\n{docData} and {webData}"
+        client = OpenAI(api_key=openai_key)
+        """
+        This streams the response from ChatGPT
+        """
+        return Response(stream_with_context(chat_gpt_helper(client, prompt)),
+                         mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        return str(e)
+
+@app.route('/qna', methods=['POST'])
+def qna():
+    try:
+        
+        loop = asyncio.new_event_loop()
+        webData = loop.run_until_complete(getWebExtractLCFormat(request))
+        log.info(f"Web extarct LC format {webData}")
+        # Prepare the prompt
+        data = request.get_json()
+        query = data['q']
+        topk = data['topk']
+        count = data['count']
+        openai_key = data['openaiKey']
+        vectorstore = Pinecone.from_existing_index(index_name="structhub" , text_key='text',namespace='20', embedding=VertexAIEmbeddings("text-multilingual-embedding-preview-0409"))
+        llm = ChatOpenAI(model="gpt-4o", callbacks=callbacks, streaming=True, verbose=False, temperature=0.0, api_key=openai_key)
+        llm_mq = ChatOpenAI(model="gpt-4o", api_key=openai_key)
+        multiQueryPrompt = PromptTemplate(
+                    input_variables=["question"],
+                    template=f"""You are an AI language model assistant. Your task is 
+                to generate 3 different versions of the given user 
+                question to retrieve relevant documents from a vector  database. 
+                By generating multiple perspectives on the user question, 
+                your goal is to help the user overcome some of the limitations 
+                of distance-based similarity search. Provide these alternative 
+                questions separated by newlines. Original question: {query}
+                """)
+
+        COMBINE_QUESTION_PROMPT_TEMPLATE = """You are a research agent and create detailed report in paragraph form. Use the following portion of a long document to see if any of the text is relevant to answer the question. 
+                    Return any relevant text in {language}.
+                    {context}
+                    Question: {question}
+                    Relevant text, if any, in {language}:"""
+
+        COMBINE_QUESTION_PROMPT = PromptTemplate(
+                        template=COMBINE_QUESTION_PROMPT_TEMPLATE, input_variables=[
+                            "context", "question", "language"]
+            )
+
+        COMBINE_PROMPT_TEMPLATE = f"""
+        # Instructions:
+        - You are a research agent and create detailed report in paragraph form with references from `Source` and `Page` section. 
+        - Include as much information possible. Do not try to summarize.
+        - Include statistics wherever available.
+        - Given the following extracted parts from one or multiple documents, and a question, create a final answer with references. 
+        - The reference must be from the `Source:` section of the extracted part.
+        - Refrence `Page` can be page number of document or a title of a page.
+        - Reference `Source` can be a URL of a webiste page or a docuemnt name.
+        - Always provide `Source` value. never miss this. It is very important.
+        - **You can only answer the question from information contained in the extracted parts below**, DO NOT use your prior knowledge.
+        - Never provide an answer without references.
+        - Never provide an answer without references.This is very important and must be adhered to.
+        - If you don't know the answer, just say that you don't know. Don't try to make up an answer.
+
+        =========
+        QUESTION: {{question}}
+        =========
+        {{summaries}}
+        =========
+        FINAL ANSWER in {{language}} :"""
+
+        COMBINE_PROMPT = PromptTemplate(
+            template=COMBINE_PROMPT_TEMPLATE, input_variables=[
+                "summaries", "question"]
+        )
+
+        DOCUMENT_PROMPT = PromptTemplate(
+            template="Content: {page_content}\nSource: {source}\nPage: {page}",
+            input_variables=["page_content", "source", "page"],
+        )
+
+        # retriever = MultiQueryRetriever.from_llm(retriever=vectorstore.as_retriever(search_kwargs={"k": 2}), llm=llm_mq, prompt=multiQueryPrompt, include_original=True)
+        retriever = vectorstore.as_retriever(
+                    search_kwargs={"k": topk})
+        docs = retriever.invoke(input=query)
+        docs = docs + webData
+        chain = qa_with_sources.load_qa_with_sources_chain(llm, chain_type="map_reduce", verbose=False,
+                        question_prompt=COMBINE_QUESTION_PROMPT,
+                        combine_prompt=COMBINE_PROMPT,
+                        document_prompt=DOCUMENT_PROMPT,
+                        return_intermediate_steps=False,
+                        token_max=4800)
+        def getAnswer():
+            result = chain.invoke({"input_documents": docs, "question": query, "language": "english"})
+            if result['output_text'] is not None:
+                print(result)
+                yield result['output_text']
+
+
+        return Response(stream_with_context(getAnswer()),
+                            mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        return str(e)
+
+
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
     model = TextEmbeddingModel.from_pretrained(embedder_name)

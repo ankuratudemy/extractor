@@ -1,4 +1,0 @@
-flask
-azure-mgmt-apimanagement
-azure-identity
-requests

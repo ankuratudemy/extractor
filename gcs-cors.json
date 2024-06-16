@@ -1,8 +1,0 @@
-[
-    {
-      "origin": ["https://stage.structhub.io","http://localhost:3000", "https://structhub.io"],
-      "method": ["PUT", "POST", "GET", "FETCH"],
-      "responseHeader": ["Content-Type"],
-      "maxAgeSeconds": 3600
-    }
-]

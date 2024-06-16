@@ -27,7 +27,7 @@ def validate_api_key(api_key):
             credits_remaining = redis_conn.get(f"{tenant_id}_credits_remaining")
             if not credits_remaining:
                 return False
-            if int(credits_remaining) <= 0:
+            if float(credits_remaining) <= 0:
                 print(f"No credits left")
                 return False
             if tenant_id is not None:
