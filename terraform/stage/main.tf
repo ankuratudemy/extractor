@@ -28,7 +28,7 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-148.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-159.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:21.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
   be_concurrent_requests_per_inst      = 1
@@ -498,6 +498,15 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value_source {
           secret_key_ref {
             secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "GROQ_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "GROQ_API_KEY" : "GROQ_API_KEY_STAGE"
             version = "latest"
           }
         }

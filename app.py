@@ -8,6 +8,8 @@ from flask_limiter import Limiter, RequestLimit
 from werkzeug.utils import secure_filename
 from langchain.chains import qa_with_sources
 from langchain_pinecone import Pinecone
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 from pinecone import Pinecone as PC
 from langchain_core.prompts import PromptTemplate
 from langchain.retrievers.multi_query import MultiQueryRetriever
@@ -50,7 +52,18 @@ PINECONE_INDEX_NAME= os.environ.get('PINECONE_INDEX_NAME')
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 GCP_CREDIT_USAGE_TOPIC = os.environ.get('GCP_CREDIT_USAGE_TOPIC')
 UPLOADS_FOLDER = os.environ.get('UPLOADS_FOLDER')
-
+chat_stream = ChatGroq(
+    temperature=0,
+    model="llama3-70b-8192",
+    streaming=True
+    # api_key="" # Optional if not set as an environment variable
+)
+chat = ChatGroq(
+    temperature=0,
+    model="llama3-70b-8192",
+    model_kwargs={"response_format": {"type": "json_object"}}
+    # api_key="" # Optional if not set as an environment variable
+)
 
 def verify_api_key():
     api_key_header = request.headers.get('API-KEY')
@@ -61,7 +74,7 @@ def verify_api_key():
 @app.before_request
 def before_request():
     log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
+    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
@@ -730,15 +743,14 @@ async def getVectorStoreDocs(request):
         raise Exception(str(e))
     
     try:
-        pc = Pinecone(api_key=PINECONE_API_KEY)
-        index = pc.Index(PINECONE_INDEX_NAME)
+        pc = PC(api_key=PINECONE_API_KEY)
+        index = pc.Index(name=PINECONE_INDEX_NAME)
     except Exception as e:
         log.info(str(e))
         raise Exception(str(e))
 
     try:
-        #Get google embeddings:
-        embeddings = asyncio.run(get_google_embedding(queries=[query]))
+        embeddings = await get_google_embedding(queries=[query])
     except Exception as e:
         log.error(str(e))
         raise Exception(str(e))
@@ -773,7 +785,7 @@ async def getVectorStoreDocs(request):
         log.info(f"Message to topic: {message}")
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
-        return json_string
+        return json.dumps(doc_list)
     except Exception as e:
         log.error(str(e))
         raise Exception(str(e))
@@ -850,15 +862,14 @@ async def getWebExtract(request):
                     # text = re.sub(r'\\n', '', text)
                     return text
 
-        loop = asyncio.get_event_loop()
         tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
         extracted_texts = await asyncio.gather(*tasks)
 
         json_output = []
         for text, item in zip(extracted_texts, final_results):
             page_obj = {
-                'url': item['url'],
-                'title': item['title'],
+                'source': item['url'],
+                'page': item['title'],
                 'text': text.strip()
             }
             json_output.append(page_obj)
@@ -1140,7 +1151,40 @@ def qna():
         log.error(str(e))
         return str(e)
 
-
+@app.route('/groqchat', methods=['POST'])
+def groqchat():
+    try:
+        docData = asyncio.run(getVectorStoreDocs(request))
+        webData = asyncio.run(getWebExtract(request))
+        
+        # Prepare the prompt
+        data = request.get_json()
+        query = data['q']
+        system = """
+            You are a helpful assistant.
+            Always respond to user's question with a JSON object with three string keys: "response", "sources, and "followup_question".
+            sources key should be array of original chunk of context and it's `source` file name
+            Use this data from web search {webdocs} and this is data from private knowledge store {kbdocs}, which always have source information which could be file page, page number and url.
+            While generating answer always add numbered citations to source 
+            """
+        human = "{question}"
+        # chain = prompt | chat
+        def getAnswer():
+            prompt = ChatPromptTemplate.from_messages([("system", system), ("human", human)])
+            chain = prompt | chat_stream
+            for chunk in chain.stream({"question": query, "webdocs": webData, "kbdocs": docData}):
+                yield chunk.content
+        # response = chain.invoke({"question": query, "docs": docs})
+        # print(response)
+        # return response.content
+        # return Response(stream_with_context(getAnswer()),
+        #                  mimetype='text/event-stream')
+        return Response(stream_with_context(getAnswer()),
+                         mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        return str(e)
+    
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
     model = TextEmbeddingModel.from_pretrained(embedder_name)
