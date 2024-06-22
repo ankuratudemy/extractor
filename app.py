@@ -845,9 +845,9 @@ async def getWebExtract(request):
                     }
                     text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
                     # Replace consecutive newlines and tabs
-                    text = re.sub(r'\n+', '\n', text)
-                    text = re.sub(r'\t+', '\t', text)
-                    text = re.sub(r'\\n', '', text)
+                    # text = re.sub(r'\n+', '\n', text)
+                    # text = re.sub(r'\t+', '\t', text)
+                    # text = re.sub(r'\\n', '', text)
                     return text
 
         loop = asyncio.get_event_loop()
@@ -1045,7 +1045,7 @@ def chat():
     except Exception as e:
         log.error(str(e))
         return str(e)
-
+    
 @app.route('/qna', methods=['POST'])
 def qna():
     try:

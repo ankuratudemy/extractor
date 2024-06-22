@@ -28,7 +28,7 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-144.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-148.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:21.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
   be_concurrent_requests_per_inst      = 1
@@ -546,7 +546,7 @@ resource "google_cloud_run_service_iam_binding" "be_cloud_run_iam_binding" {
 resource "google_cloud_run_v2_service" "be_cloud_run" {
   for_each = toset(local.regions)
 
-  name     = "${local.be_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
+  name     = "${local.be_service_name_prefix}${local.be_domain_suffix}-${each.key}"
   location = each.key
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
