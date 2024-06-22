@@ -1150,6 +1150,11 @@ def qna():
     except Exception as e:
         log.error(str(e))
         return str(e)
+# Function to split data into chunks
+def split_data(data, chunk_size):
+    for i in range(0, len(data), chunk_size):
+        yield data[i:i + chunk_size]
+
 
 @app.route('/groqchat', methods=['POST'])
 def groqchat():
@@ -1162,10 +1167,12 @@ def groqchat():
         query = data['q']
         system = """
             You are a helpful assistant.
-            Always respond to user's question with a JSON object with three string keys: "response", "sources, and "followup_question".
-            sources key should be array of original chunk of context and it's `source` file name
+            Always respond to user's question with a JSON object with three keys:
+             - "response": This has the final generated answer.
+             - "sources: sources key should be array of original chunk of context as 'text' field, 'page' field as the page value from metadata section of context, and it's `source` file name or URL
+             - "followup_question".
             Use this data from web search {webdocs} and this is data from private knowledge store {kbdocs}, which always have source information which could be file page, page number and url.
-            While generating answer always add numbered citations to source 
+            While generating answer always add numbered citations to source.
             """
         human = "{question}"
         # chain = prompt | chat
