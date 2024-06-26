@@ -16,6 +16,9 @@ from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from langchain_google_vertexai import VertexAIEmbeddings
+from langchain_google_vertexai import ChatVertexAI
+from langchain_core.messages import HumanMessage
+from langchain_google_vertexai import HarmBlockThreshold, HarmCategory
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.callbacks.streaming_stdout_final_only import (
     FinalStreamingStdOutCallbackHandler,
@@ -64,7 +67,12 @@ chat = ChatGroq(
     model_kwargs={"response_format": {"type": "json_object"}}
     # api_key="" # Optional if not set as an environment variable
 )
-
+vertexchat = ChatVertexAI(model="gemini-1.5-pro", safety_settings={
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+    })
+vertexchat_stream = ChatVertexAI(model="gemini-1.5-pro", response_mime_type="application/json", safety_settings={
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+    })
 def verify_api_key():
     api_key_header = request.headers.get('API-KEY')
     res = security.api_key_required(api_key_header)
@@ -74,7 +82,7 @@ def verify_api_key():
 @app.before_request
 def before_request():
     log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
+    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'geminichat' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
@@ -702,7 +710,7 @@ def webextract():
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": count
+        "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
         log.info(f"Message to topic: {message}")
@@ -779,7 +787,7 @@ async def getVectorStoreDocs(request):
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": count * 0.1
+        "creditsUsed": count * 0.2
         })
         log.info(f"Number of pages processed: {count}")
         log.info(f"Message to topic: {message}")
@@ -879,7 +887,7 @@ async def getWebExtract(request):
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": count
+        "creditsUsed": count * 1.2
         })
         log.info(f"Number of pages processed: {count}")
         log.info(f"Message to topic: {message}")
@@ -1168,11 +1176,11 @@ def groqchat():
         system = """
             You are a helpful assistant.
             Always respond to user's question with a JSON object with three keys:
-             - "response": This has the final generated answer.
-             - "sources: sources key should be array of original chunk of context as 'text' field, 'page' field as the page value from metadata section of context, and it's `source` file name or URL
+             - "response": This has the final generated answer. While generating answer always add numbered citations.
+             - "sources: sources key should be array of 'page' field as the page value from metadata section of context, it's `source` file name or URL which was used in generating final answer, and `citation` number.
              - "followup_question".
+             Add only those `sources` from which citations are added to final answer. 
             Use this data from web search {webdocs} and this is data from private knowledge store {kbdocs}, which always have source information which could be file page, page number and url.
-            While generating answer always add numbered citations to source.
             """
         human = "{question}"
         # chain = prompt | chat
@@ -1191,7 +1199,45 @@ def groqchat():
     except Exception as e:
         log.error(str(e))
         return str(e)
-    
+
+@app.route('/geminichat', methods=['POST'])
+def geminichat():
+    try:
+        docData = asyncio.run(getVectorStoreDocs(request))
+        webData = asyncio.run(getWebExtract(request))
+        
+        # Prepare the prompt
+        data = request.get_json()
+        query = data['q']
+        system = """
+            You are a helpful assistant.
+            Always respond to user's question with a JSON object with three keys:
+             - `response`: This has the final generated answer.
+             - `sources`: sources key should be array of original chunk of context as `text` field, citation number as `citation`,  `page` field as the page value, and it's `source` file name or URL.
+             - "followup_question".
+            Make sure to only include `sources` from which citations are created. DO NOT inlcude sources not used in generating final answer.
+            Use this data from web search {webdocs} and this is data from private knowledge store {kbdocs}, which always have source information which could be file page, page number and url.
+            DO not respond in markdown format. respond in json format. Do not add ```json in begnning or answer and ``` in end.
+            """
+        human = "{question}"
+        # chain = prompt | chat
+        def getAnswer():
+            prompt = ChatPromptTemplate.from_messages([("system", system), ("human", human)])
+            chain = prompt | vertexchat_stream
+            for chunk in chain.stream({"question": query, "webdocs": webData, "kbdocs": docData}):
+                yield chunk.content
+        # response = chain.invoke({"question": query, "docs": docs})
+        # print(response)
+        # return response.content
+        # return Response(stream_with_context(getAnswer()),
+        #                  mimetype='text/event-stream')
+        return Response(stream_with_context(getAnswer()),
+                         mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        return str(e)
+
+
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
     model = TextEmbeddingModel.from_pretrained(embedder_name)

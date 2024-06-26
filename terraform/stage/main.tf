@@ -5,7 +5,7 @@ provider "google" {
 }
 
 variable "environment" {
-  description = "Environment: 'prod'"
+  description = "Environment: 'stage'"
   type        = string
   default     = "stage"
 }
@@ -28,7 +28,7 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-163.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-179.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:21.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
   be_concurrent_requests_per_inst      = 1
@@ -952,7 +952,7 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
 resource "google_eventarc_trigger" "fileupload_trigger" {
   for_each = toset(local.us_regions)
 
-  name     = "file-upload-trigger-${each.key}"
+  name     = "file-upload-trigger-${each.key}-${local.environment}"
   location = "us"
 
   matching_criteria {
