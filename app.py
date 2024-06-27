@@ -55,6 +55,74 @@ PINECONE_INDEX_NAME= os.environ.get('PINECONE_INDEX_NAME')
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 GCP_CREDIT_USAGE_TOPIC = os.environ.get('GCP_CREDIT_USAGE_TOPIC')
 UPLOADS_FOLDER = os.environ.get('UPLOADS_FOLDER')
+
+oFileExtMap = {
+            "application/octet-stream": "use_extension", # use file extension if content type is octet-stream
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "application/pdf": "pdf",
+            "application/vnd.oasis.opendocument.text": "odt",
+            "application/vnd.oasis.opendocument.spreadsheet": "ods",
+            "application/vnd.oasis.opendocument.presentation": "odp",
+            "application/vnd.oasis.opendocument.graphics": "odg",
+            "application/vnd.oasis.opendocument.formula": "odf",
+            "application/vnd.oasis.opendocument.flat.text": "fodt",
+            "application/vnd.oasis.opendocument.flat.presentation": "fodp",
+            "application/vnd.oasis.opendocument.flat.graphics": "fodg",
+            "application/vnd.oasis.opendocument.spreadsheet-template": "ots",
+            "application/vnd.oasis.opendocument.flat.spreadsheet-template": "fots",
+            "application/vnd.lotus-1-2-3": "123",
+            "application/dbase": "dbf",
+            "text/html": "html",
+            "application/vnd.lotus-screencam": "scm",
+            "text/csv": "csv",
+            "application/vnd.ms-excel": "xls",
+            "application/vnd.ms-excel.template.macroenabled.12": "xltm",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.template": 'dotx',
+            "application/vnd.ms-word.document.macroenabled.12": 'docm',
+            "application/vnd.ms-word.template.macroenabled.12": 'dotm',
+            "application/xml": 'xml',
+            "application/msword": 'doc',
+            "application/vnd.ms-word.document.macroenabled.12": 'docm',
+            "application/vnd.ms-word.template.macroenabled.12": 'dotm',
+            "application/rtf": 'rtf',
+            "application/wordperfect": 'wpd',
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 'xlsx',
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.template": 'xltx',
+            "application/vnd.ms-excel.sheet.macroenabled.12": 'xlsm',
+            "application/vnd.ms-excel.template.macroenabled.12": 'xltm',
+            "application/vnd.corelqpw": 'qpw',
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": 'pptx',
+            "application/vnd.openxmlformats-officedocument.presentationml.slideshow": 'ppsx',
+            "application/vnd.openxmlformats-officedocument.presentationml.slide": 'ppmx',
+            "application/vnd.openxmlformats-officedocument.presentationml.template": 'potx',
+            "application/vnd.ms-powerpoint": 'ppt',
+            "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
+            "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
+            "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
+            "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
+            "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
+            "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
+            "application/vnd.ms-powerpoint": 'ppt',
+            "application/vnd.ms-powerpoint.slideshow": 'pps',
+            "application/vnd.ms-powerpoint.presentation": 'ppt',
+            "application/vnd.ms-powerpoint.addin": 'ppa',
+            # Email formats
+            "message/rfc822": 'eml',  # EML format
+            "application/vnd.ms-outlook": 'msg',  # MSG format
+            "application/mbox": 'mbox',  # MBOX format
+            "application/vnd.ms-outlook": 'pst',  # PST format
+            "application/ost": 'ost',  # OST format
+            "application/emlx": 'emlx',  # EMLX format
+            "application/dbx": 'dbx',  # DBX format
+            "application/dat": 'dat',  # Windows Mail (.dat) format
+            # Image formats
+            "image/jpeg": 'jpg',  # JPEG format
+            "image/png": 'png',  # PNG format
+            "image/gif": 'gif',  # GIF format
+            "image/tiff": 'tiff',  # TIFF format
+            "image/bmp": 'bmp'  # BMP format
+        }
+        
 chat_stream = ChatGroq(
     temperature=0,
     model="llama3-70b-8192",
@@ -178,72 +246,6 @@ def extract():
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         log.info(uploaded_file.content_type)
         
-        oFileExtMap = {
-            "application/octet-stream": "use_extension", # use file extension if content type is octet-stream
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-            "application/pdf": "pdf",
-            "application/vnd.oasis.opendocument.text": "odt",
-            "application/vnd.oasis.opendocument.spreadsheet": "ods",
-            "application/vnd.oasis.opendocument.presentation": "odp",
-            "application/vnd.oasis.opendocument.graphics": "odg",
-            "application/vnd.oasis.opendocument.formula": "odf",
-            "application/vnd.oasis.opendocument.flat.text": "fodt",
-            "application/vnd.oasis.opendocument.flat.presentation": "fodp",
-            "application/vnd.oasis.opendocument.flat.graphics": "fodg",
-            "application/vnd.oasis.opendocument.spreadsheet-template": "ots",
-            "application/vnd.oasis.opendocument.flat.spreadsheet-template": "fots",
-            "application/vnd.lotus-1-2-3": "123",
-            "application/dbase": "dbf",
-            "text/html": "html",
-            "application/vnd.lotus-screencam": "scm",
-            "text/csv": "csv",
-            "application/vnd.ms-excel": "xls",
-            "application/vnd.ms-excel.template.macroenabled.12": "xltm",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.template": 'dotx',
-            "application/vnd.ms-word.document.macroenabled.12": 'docm',
-            "application/vnd.ms-word.template.macroenabled.12": 'dotm',
-            "application/xml": 'xml',
-            "application/msword": 'doc',
-            "application/vnd.ms-word.document.macroenabled.12": 'docm',
-            "application/vnd.ms-word.template.macroenabled.12": 'dotm',
-            "application/rtf": 'rtf',
-            "application/wordperfect": 'wpd',
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 'xlsx',
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.template": 'xltx',
-            "application/vnd.ms-excel.sheet.macroenabled.12": 'xlsm',
-            "application/vnd.ms-excel.template.macroenabled.12": 'xltm',
-            "application/vnd.corelqpw": 'qpw',
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation": 'pptx',
-            "application/vnd.openxmlformats-officedocument.presentationml.slideshow": 'ppsx',
-            "application/vnd.openxmlformats-officedocument.presentationml.slide": 'ppmx',
-            "application/vnd.openxmlformats-officedocument.presentationml.template": 'potx',
-            "application/vnd.ms-powerpoint": 'ppt',
-            "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
-            "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
-            "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
-            "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
-            "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
-            "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
-            "application/vnd.ms-powerpoint": 'ppt',
-            "application/vnd.ms-powerpoint.slideshow": 'pps',
-            "application/vnd.ms-powerpoint.presentation": 'ppt',
-            "application/vnd.ms-powerpoint.addin": 'ppa',
-            # Email formats
-            "message/rfc822": 'eml',  # EML format
-            "application/vnd.ms-outlook": 'msg',  # MSG format
-            "application/mbox": 'mbox',  # MBOX format
-            "application/vnd.ms-outlook": 'pst',  # PST format
-            "application/ost": 'ost',  # OST format
-            "application/emlx": 'emlx',  # EMLX format
-            "application/dbx": 'dbx',  # DBX format
-            "application/dat": 'dat',  # Windows Mail (.dat) format
-            # Image formats
-            "image/jpeg": 'jpg',  # JPEG format
-            "image/png": 'png',  # PNG format
-            "image/gif": 'gif',  # GIF format
-            "image/tiff": 'tiff',  # TIFF format
-            "image/bmp": 'bmp'  # BMP format
-        }
         # Reverse mapping of content types to file extensions
         reverse_file_ext_map = {v: k for k, v in oFileExtMap.items()}
 
@@ -804,10 +806,10 @@ async def getWebExtract(request):
         log.info(f"user_id {userId}")
         if not userId:
             raise Exception("invalid request")
-        
+
         if not request.is_json:
             raise Exception("invalid request")
-        
+
         data = request.get_json()
         log.info(data)
         headers = {}
@@ -820,13 +822,13 @@ async def getWebExtract(request):
         count = data['count']
         params = {param: data[param] for param in required_params}
         params['pageno'] = 1  # Initialize page number
-        params['format'] = 'json' # set output format as json
+        params['format'] = 'json'  # Set output format as json
         log.info(f"params: {params}")
 
     except Exception as e:
         log.error(str(e))
         raise Exception(str(e))
-    
+
     try:
         total_results = []
         total_count = 0
@@ -852,23 +854,30 @@ async def getWebExtract(request):
         await fetch_results()
         final_results = total_results[:count]
 
-        # Fetch HTML content and extract text for each URL
+        # Fetch content and extract text for each URL
         async def fetch_and_extract(url, title, headers):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
-                    html_content = await response.read()
-                    payload = io.BytesIO(html_content)
-                    extract_headers = {
-                        'Content-Type': 'text/html',
-                        'Accept': 'text/plain',
-                        'Authorization': f'Bearer {bearer_token}'
-                    }
-                    text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
-                    # Replace consecutive newlines and tabs
-                    # text = re.sub(r'\n+', '\n', text)
-                    # text = re.sub(r'\t+', '\t', text)
-                    # text = re.sub(r'\\n', '', text)
-                    return text
+                    if response.status != 200:
+                        return ''  # Skip if non-200 response
+
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    content = await response.read()
+
+                    file_extension = oFileExtMap.get(content_type, None)
+                    if file_extension:
+                        if file_extension == "use_extension":
+                            file_extension = url.split('.')[-1].lower()
+
+                        payload = io.BytesIO(content)
+                        extract_headers = {
+                            'Accept': 'text/plain',
+                            'Authorization': f'Bearer {bearer_token}'
+                        }
+                        text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
+                        return text
+                    else:
+                        return ''  # Unsupported content type
 
         tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
         extracted_texts = await asyncio.gather(*tasks)
@@ -883,16 +892,15 @@ async def getWebExtract(request):
             json_output.append(page_obj)
 
         json_string = json.dumps(json_output, indent=4)
-        #Build message for topic
+        # Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": count * 1.2
+            "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+            "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
         log.info(f"Message to topic: {message}")
-        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
         return json_string
 
     except Exception as e:
@@ -1203,40 +1211,45 @@ def groqchat():
 @app.route('/geminichat', methods=['POST'])
 def geminichat():
     try:
-        docData = asyncio.run(getVectorStoreDocs(request))
-        webData = asyncio.run(getWebExtract(request))
-        
-        # Prepare the prompt
         data = request.get_json()
-        query = data['q']
+        query = data.get('q')
+        sources = data.get('sources', [])
+        topk = data.get('topk', 5)
+        count = data.get('count', 5)
+
+        docData = []
+        webData = []
+
+        if 'vstore' in sources:
+            docData = asyncio.run(getVectorStoreDocs(request))
+        if 'web' in sources:
+            webData = asyncio.run(getWebExtract(request))
+
         system = """
             You are a helpful assistant.
-            Always respond to user's question with a JSON object with three keys:
-             - `response`: This has the final generated answer.
-             - `sources`: sources key should be array of original chunk of context as `text` field, citation number as `citation`,  `page` field as the page value, and it's `source` file name or URL.
-             - "followup_question".
-            Make sure to only include `sources` from which citations are created. DO NOT inlcude sources not used in generating final answer.
-            Use this data from web search {webdocs} and this is data from private knowledge store {kbdocs}, which always have source information which could be file page, page number and url.
-            DO not respond in markdown format. respond in json format. Do not add ```json in begnning or answer and ``` in end.
+            Always respond to the user's question with a JSON object containing three keys:
+            - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
+            - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+            - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+            Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+
+            Use this data from web search {webdocs} and from the private knowledge store {kbdocs}, which always have source information including file page, page number, and URL.
+
+            Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
             """
         human = "{question}"
-        # chain = prompt | chat
+        
         def getAnswer():
             prompt = ChatPromptTemplate.from_messages([("system", system), ("human", human)])
             chain = prompt | vertexchat_stream
             for chunk in chain.stream({"question": query, "webdocs": webData, "kbdocs": docData}):
                 yield chunk.content
-        # response = chain.invoke({"question": query, "docs": docs})
-        # print(response)
-        # return response.content
-        # return Response(stream_with_context(getAnswer()),
-        #                  mimetype='text/event-stream')
-        return Response(stream_with_context(getAnswer()),
-                         mimetype='text/event-stream')
+
+        return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
     except Exception as e:
         log.error(str(e))
         return str(e)
-
 
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
