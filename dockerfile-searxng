@@ -1,0 +1,9 @@
+# Use the official SearXNG image
+FROM searxng/searxng
+COPY searxng_settings.yml /etc/searxng/settings.yml
+COPY uwsgi.ini /etc/searxng/uwsgi.ini
+# Expose port 8080
+EXPOSE 8080
+
+# Start SearXNG
+CMD ["python", "-m", "searxng"]

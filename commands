@@ -1,8 +1,0 @@
-aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 358775306462.dkr.ecr.us-west-2.amazonaws.com
-docker build --progress=plain -t extractor .
-docker tag extractor:latest 358775306462.dkr.ecr.us-west-2.amazonaws.com/extractor:latest
-docker push 358775306462.dkr.ecr.us-west-2.amazonaws.com/extractor:latest
-
-
-
-aws cloudformation --region eu-west-2 deploy --stack-name Extractor --template-file cloudformation/template.yml --no-verify-ssl --capabilities CAPABILITY_NAMED_IAM

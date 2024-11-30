@@ -1,0 +1,5 @@
+psycopg2-binary
+google-cloud-pubsub
+google-api-core
+redis
+
