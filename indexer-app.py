@@ -51,8 +51,6 @@ index_name = os.environ.get('PINECONE_INDEX_NAME')
 pc = Pinecone(api_key=api_key)
 # connect to index
 index = pc.Index(index_name)
-# Create the ID token
-bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
 
 def get_event_loop():
     try:
@@ -265,7 +263,9 @@ def event_handler():
             # # Get the number of available CPUs
             # num_cpus = multiprocessing.cpu_count()
             # log.info(num_cpus)
-
+            # Create the ID token
+            bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
+            log.info(f"bearer_token: {bearer_token}")
             #Append Header value
             headers['Content-Type'] = contentType
             headers['Authorization'] = f'Bearer {bearer_token}'

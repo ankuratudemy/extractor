@@ -33,4 +33,5 @@ langchain-pinecone==0.0.3
 langchain-groq==0.1.5
 bs4
 langchain-google-vertexai
+anthropic[vertex]
 

@@ -17,12 +17,19 @@ from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_google_vertexai import ChatVertexAI
-from langchain_core.messages import HumanMessage
 from langchain_google_vertexai import HarmBlockThreshold, HarmCategory
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.callbacks.streaming_stdout_final_only import (
     FinalStreamingStdOutCallbackHandler,
 )
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+)
+from langchain_core.outputs import LLMResult
+from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 callbacks = [FinalStreamingStdOutCallbackHandler()]
 from vertexai.preview.language_models import TextEmbeddingModel
 from urllib.parse import urlencode
@@ -122,7 +129,15 @@ oFileExtMap = {
             "image/tiff": 'tiff',  # TIFF format
             "image/bmp": 'bmp'  # BMP format
         }
-        
+
+anthropic_chat = ChatAnthropicVertex(
+    model_name="claude-3-5-sonnet@20240620",
+    project=GCP_PROJECT_ID,
+    location="us-east5",
+    max_tokens=4096,
+    temperature=0.1
+)
+
 chat_stream = ChatGroq(
     temperature=0,
     model="llama3-70b-8192",
@@ -150,7 +165,7 @@ def verify_api_key():
 @app.before_request
 def before_request():
     log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'geminichat' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
+    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'geminichat' or request.endpoint == 'anthropic' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna' or request.endpoint =='chatmr') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
         valid = verify_api_key()
         if not valid:
             return Response(status=401)
@@ -322,7 +337,10 @@ def extract():
 
         # Build the JSON output using mapped_results
         json_output = []
+        chargeable_credits = 0
         for result, page_num in results:
+            if result.strip():  # Check if the text is not empty after stripping
+                chargeable_credits += 1
             page_obj = {
                 'page': page_num,
                 'text': result.strip()
@@ -340,9 +358,10 @@ def extract():
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": num_pages
+        "creditsUsed": chargeable_credits
         })
         log.info(f"Number of pages processed: {num_pages}")
+        log.info(f" Chargeable creadits: {chargeable_credits}")
         log.info(f"Message to topic: {message}")
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
@@ -833,11 +852,12 @@ async def getWebExtract(request):
         total_results = []
         total_count = 0
         processed_urls = set()
+        target_count = count * 3  # Fetch 3 times the number of URLs
 
         async def fetch_results():
             async with aiohttp.ClientSession() as session:
                 nonlocal total_results, total_count
-                while total_count < count:
+                while total_count < target_count:
                     result, pageno = await async_get_request(session, WEBSEARCH_SERVER_URL, params, headers)
                     results = result.get('results', [])
                     if not results:
@@ -847,43 +867,51 @@ async def getWebExtract(request):
                             processed_urls.add(item['url'])
                             total_results.append(item)
                             total_count += 1
-                            if total_count >= count:
+                            if total_count >= target_count:
                                 break
                     params['pageno'] = pageno + 1  # Increment page number
 
         await fetch_results()
-        final_results = total_results[:count]
+        final_results = total_results[:target_count]
 
-        # Fetch content and extract text for each URL
         async def fetch_and_extract(url, title, headers):
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        return ''  # Skip if non-200 response
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        log.info(response.status)
+                        log.info(response)
+                        if response.status != 200:
+                            return ''  # Skip if non-200 response
 
-                    content_type = response.headers.get('Content-Type', '').lower()
-                    content = await response.read()
-
-                    file_extension = oFileExtMap.get(content_type, None)
-                    if file_extension:
-                        if file_extension == "use_extension":
-                            file_extension = url.split('.')[-1].lower()
-
-                        payload = io.BytesIO(content)
-                        extract_headers = {
-                            'Accept': 'text/plain',
-                            'Authorization': f'Bearer {bearer_token}'
-                        }
-                        text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
-                        return text
-                    else:
-                        return ''  # Unsupported content type
+                        content_type = response.headers.get('Content-Type', '').lower()
+                        log.info(f"content type: {content_type}")
+                        content = await response.read()
+                        file_extension = oFileExtMap.get(content_type, None)
+                        log.info(f"file extension: {file_extension}")
+                        if file_extension:
+                            payload = io.BytesIO(content)
+                            extract_headers = {
+                                'Accept': 'text/plain',
+                                'Authorization': f'Bearer {bearer_token}'
+                            }
+                            text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
+                            log.info(f"TEXT EXTRACTED: {text}")
+                            return text
+                        else:
+                            return ''  # Unsupported content type
+            except Exception as e:
+                log.error(f"Exception occurred while processing URL {url}: {e}")
+                return ''  # Continue processing other URLs even if an exception occurs
 
         tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
         extracted_texts = await asyncio.gather(*tasks)
 
+        # Filter out empty texts and limit to the desired count
+        non_empty_texts = [text for text in extracted_texts if text.strip()]
+        final_texts = non_empty_texts[:count]
+
         json_output = []
-        for text, item in zip(extracted_texts, final_results):
+        for text, item in zip(final_texts, final_results[:len(final_texts)]):
             page_obj = {
                 'source': item['url'],
                 'page': item['title'],
@@ -906,6 +934,115 @@ async def getWebExtract(request):
     except Exception as e:
         log.error(str(e))
         raise Exception(str(e))
+    
+# async def getWebExtract(request):
+#     try:
+#         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+#         log.info(f"user_id {userId}")
+#         if not userId:
+#             raise Exception("invalid request")
+
+#         if not request.is_json:
+#             raise Exception("invalid request")
+
+#         data = request.get_json()
+#         log.info(data)
+#         headers = {}
+#         headers['Authorization'] = f'Bearer {websearch_bearer_token}'
+#         required_params = ['q', 'time_range', 'count']
+#         missing_params = [param for param in required_params if param not in data]
+#         if missing_params:
+#             return f"Missing required parameters: {', '.join(missing_params)}", 400
+#         query = data['q']
+#         count = data['count']
+#         params = {param: data[param] for param in required_params}
+#         params['pageno'] = 1  # Initialize page number
+#         params['format'] = 'json'  # Set output format as json
+#         log.info(f"params: {params}")
+
+#     except Exception as e:
+#         log.error(str(e))
+#         raise Exception(str(e))
+
+#     try:
+#         total_results = []
+#         total_count = 0
+#         processed_urls = set()
+
+#         async def fetch_results():
+#             async with aiohttp.ClientSession() as session:
+#                 nonlocal total_results, total_count
+#                 while total_count < count:
+#                     result, pageno = await async_get_request(session, WEBSEARCH_SERVER_URL, params, headers)
+#                     results = result.get('results', [])
+#                     if not results:
+#                         break
+#                     for item in results:
+#                         if item['url'] not in processed_urls:
+#                             processed_urls.add(item['url'])
+#                             total_results.append(item)
+#                             total_count += 1
+#                             if total_count >= count:
+#                                 break
+#                     params['pageno'] = pageno + 1  # Increment page number
+
+#         await fetch_results()
+#         final_results = total_results[:count]
+
+#         # Fetch content and extract text for each URL
+#         async def fetch_and_extract(url, title, headers):
+#             async with aiohttp.ClientSession() as session:
+#                 async with session.get(url) as response:
+#                     log.info(response.status)
+#                     log.info(response)
+#                     if response.status != 200:
+#                         return ''  # Skip if non-200 response
+
+#                     content_type = response.headers.get('Content-Type', '').lower()
+#                     content = await response.read()
+
+#                     file_extension = oFileExtMap.get(content_type, None)
+#                     if file_extension:
+#                         if file_extension == "use_extension":
+#                             file_extension = url.split('.')[-1].lower()
+
+#                         payload = io.BytesIO(content)
+#                         extract_headers = {
+#                             'Accept': 'text/plain',
+#                             'Authorization': f'Bearer {bearer_token}'
+#                         }
+#                         text, _ = await async_put_request(session, SERVER_URL, payload, title, extract_headers)
+#                         return text
+#                     else:
+#                         return ''  # Unsupported content type
+
+#         tasks = [fetch_and_extract(item['url'], item['title'], headers) for item in final_results]
+#         extracted_texts = await asyncio.gather(*tasks)
+
+#         json_output = []
+#         for text, item in zip(extracted_texts, final_results):
+#             page_obj = {
+#                 'source': item['url'],
+#                 'page': item['title'],
+#                 'text': text.strip()
+#             }
+#             json_output.append(page_obj)
+
+#         json_string = json.dumps(json_output, indent=4)
+#         # Build message for topic
+#         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+#         message = json.dumps({
+#             "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+#             "creditsUsed": count * 0.3
+#         })
+#         log.info(f"Number of pages processed: {count}")
+#         log.info(f"Message to topic: {message}")
+#         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
+#         return json_string
+
+#     except Exception as e:
+#         log.error(str(e))
+#         raise Exception(str(e))
 
 async def getWebExtractLCFormat(request):
     try:
@@ -1247,6 +1384,149 @@ def geminichat():
                 yield chunk.content
 
         return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        return str(e)
+
+
+@app.route('/anthropic', methods=['POST'])
+def anthropic():
+    try:
+        data = request.get_json()
+        query = data.get('q')
+        sources = data.get('sources', [])
+
+        docData = []
+        webData = []
+
+        if 'vstore' in sources:
+            docData = asyncio.run(getVectorStoreDocs(request))
+        if 'web' in sources:
+            webData = asyncio.run(getWebExtract(request))
+        # prepare input data for the model
+        raw_context = (
+            f"""
+                    You are a helpful assistant.
+                    Always respond to the user's question with a JSON object containing three keys:
+                    - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
+                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                    - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+                    Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+                    DO NOT use your existing information and only use the information provided below to generate fial answer.
+                    Use this data from web search {webData} and from the private knowledge store {docData}, which always have source information including file page, page number, and URL.
+
+                    Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
+                    """
+        )
+        question = (
+            f"{query}"
+        )
+        context = SystemMessage(content=raw_context)
+        message = HumanMessage(content=question)
+
+        def getAnswer():
+            sync_response = anthropic_chat.stream([context, message])
+            for chunk in sync_response:
+                yield chunk.content
+
+        return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        return str(e)
+
+@app.route('/chatmr', methods=['POST'])
+def chatmr():
+    try:
+        data = request.get_json()
+        query = data.get('q')
+        sources = data.get('sources', [])
+
+        docData = []
+        webData = []
+
+        if 'vstore' in sources:
+            docData = asyncio.run(getVectorStoreDocs(request))
+        if 'web' in sources:
+            webData = asyncio.run(getWebExtract(request))
+        log.info(f"Web Data {webData}")
+        log.info(f"Doc Data {docData}")
+        def chunk_data(data, chunk_size=10):
+            for i in range(0, len(data), chunk_size):
+                yield data[i:i + chunk_size]
+
+        async def generate_partial_responses(query, combined_data):
+            tasks = []
+            log.info(f"Combined Data {combined_data}")
+            for doc_chunk, web_chunk in combined_data:
+                raw_context = (
+                    f"""
+                            You are a helpful assistant.
+                            Always respond to the user's question with a JSON object containing three keys:
+                            - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
+                            - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                            - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+                            Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+                            DO NOT use your existing information and only use the information provided below to generate final answer.
+                            Use this data from web search {web_chunk} and from the private knowledge store {doc_chunk}, which always have source information including file page, page number, and URL.
+
+                            Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
+                            """
+                )
+                question = f"{query}"
+                context = SystemMessage(content=raw_context)
+                message = HumanMessage(content=question)
+                tasks.append(anthropic_chat.ainvoke([context, message]))
+
+            return await asyncio.gather(*tasks)
+
+        async def main():
+            combined_data = list(zip(chunk_data(docData), chunk_data(webData)))
+            
+            partial_responses = await generate_partial_responses(query, combined_data)
+            log.info(f"Partial Responses {partial_responses}")
+            final_response_content = "".join([response['response'] for response in partial_responses])
+            final_sources = []
+            for response in partial_responses:
+                final_sources.extend(response['sources'])
+
+            final_context = (
+                f"""
+                    You are a helpful assistant.
+                    Always respond to the user's question with a JSON object containing three keys:
+                    - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
+                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                    - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+                    Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+                    DO NOT use your existing information and only use the information provided below to generate final answer.
+                    Use this data from previous responses {final_response_content}, which have source information including file page, page number, and URL.
+
+                    Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
+                """
+            )
+            context = SystemMessage(content=final_context)
+            message = HumanMessage(content=query)
+
+            return context, message
+        
+        # Check if there's an existing event loop
+        try:
+            loop = asyncio.get_running_loop()
+            context, message = loop.run_until_complete(main())
+        except RuntimeError:  # No event loop is running
+            context, message = asyncio.run(main())
+        log.info(f"Final context message {context} {message}")
+
+        def stream_response():
+            sync_response = anthropic_chat.stream([context, message])
+            for chunk in sync_response:
+                yield chunk.content
+
+
+        return Response(stream_with_context(stream_response()), mimetype='text/event-stream')
+    
     except Exception as e:
         log.error(str(e))
         return str(e)
