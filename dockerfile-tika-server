@@ -52,13 +52,13 @@ RUN set -eux \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends $JRE \
         gdal-bin \
         tesseract-ocr \
-        tesseract-ocr-eng \
-        tesseract-ocr-ita \
-        tesseract-ocr-fra \
-        tesseract-ocr-spa \
-        tesseract-ocr-deu \
-        tesseract-ocr-hin \
-        # tesseract-ocr-all \
+        # tesseract-ocr-eng \
+        # tesseract-ocr-ita \
+        # tesseract-ocr-fra \
+        # tesseract-ocr-spa \
+        # tesseract-ocr-deu \
+        # tesseract-ocr-hin \
+        tesseract-ocr-all \
     && echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
         xfonts-utils \
@@ -77,9 +77,11 @@ COPY --from=fetch_tika /tika-server-standard-${TIKA_VERSION}.jar /tika-server-st
 RUN mkdir tika-extras
 COPY /tika-extras/* tika-extras/.
 RUN ls -ltr
+RUN fc-cache -f -v
+COPY tika-config.xml .
 USER $UID_GID
 
 EXPOSE 9998
 ENTRYPOINT [ "/bin/sh", "-c", "exec java -cp \"/tika-server-standard-${TIKA_VERSION}.jar:/tika-extras/*\" org.apache.tika.server.core.TikaServerCli -h 0.0.0.0 $0 $@"]
 
-LABEL maintainer="Apache Tika Developers dev@tika.apache.org"
+LABEL maintainer="Structhub technologies at support@structhub.io"

@@ -18,7 +18,7 @@ RUN ln -s /opt/libreoffice7.6/program/soffice /usr/local/bin/soffice
 RUN ln -s /opt/libreoffice7.6/program/soffice /usr/local/bin/lowriter
 
 RUN /opt/libreoffice7.6/program/soffice --version
-COPY requirements.txt .
+COPY requirements-indexer.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 # Create a new directory called "uploads"
 RUN mkdir /app/uploads
@@ -53,7 +53,7 @@ RUN  apt-get install --yes --no-install-recommends tesseract-ocr-all \
 COPY ./shared /app/shared
 COPY ./SAKeys/fe-key.json key.json
 # Copy the application code to the container
-COPY app.py .
+COPY indexer-app.py app.py
 RUN fc-cache -f -v
 # Expose port 5000 for the Flask application
 EXPOSE 5000

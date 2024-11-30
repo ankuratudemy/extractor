@@ -24,6 +24,12 @@ def validate_api_key(api_key):
         try:
             redis_conn = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
             tenant_id = redis_conn.get(api_key)
+            credits_remaining = redis_conn.get(f"{tenant_id}_credits_remaining")
+            if not credits_remaining:
+                return False
+            if float(credits_remaining) <= 0:
+                print(f"No credits left")
+                return False
             if tenant_id is not None:
                 redis_conn.close()
                 tenant_data = decode_api_key(api_key)

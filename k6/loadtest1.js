@@ -4,8 +4,8 @@ import { sleep } from 'k6';
 
 
 export let options = {
-  vus: 10,// number of virtual users
-  duration: '5m', // test duration
+  vus: 100,// number of virtual users
+  duration: '2m', // test duration
 };
 
 const binFile = open('/C:/Users/ankur/Downloads/Format of NOC From Registered Office Owner.docx', 'b');
