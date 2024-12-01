@@ -1,3 +1,4 @@
+from shared.logging_config import log
 import os
 import io
 from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response
@@ -19,9 +20,8 @@ import ssl
 import signal
 
 sys.path.append('../')
-from shared.logging_config import log
 app = Flask(__name__)
-app.debug=True
+app.debug = True
 
 # Assuming you have Redis connection details
 REDIS_HOST = os.environ.get('REDIS_HOST')
@@ -29,44 +29,45 @@ REDIS_PORT = os.environ.get('REDIS_PORT')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
-#Other env specific varibales:
+# Other env specific varibales:
 
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 GCP_CREDIT_USAGE_TOPIC = os.environ.get('GCP_CREDIT_USAGE_TOPIC')
 UPLOADS_FOLDER = os.environ.get('UPLOADS_FOLDER')
 
-def verify_api_key():
-    api_key_header = request.headers.get('API-KEY')
-    res = security.api_key_required(api_key_header)
-    return res
-
 
 @app.before_request
 def before_request():
-    if request.endpoint == 'extract_text':  # Check if the request is for the /extract route
-        valid = verify_api_key()
+    if request.endpoint == 'extract_text':
+        api_key_header = request.headers.get('API-KEY')
+        valid = security.api_key_required(api_key_header)
         if not valid:
             return Response(status=401)
-        
+
+
 def default_error_responder(request_limit: RequestLimit):
     # return jsonify({"message": f'rate Limit Exceeded: {request_limit}'}), 429
     return Response(status=429)
 
+
 limiter = Limiter(
-        key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        app=app,
-        storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
-        storage_options={"socket_connect_timeout": 30},
-        strategy="moving-window",  # or "moving-window"
-        on_breach=default_error_responder
-    )
+    key_func=lambda: getattr(request, 'tenant_data',
+                             {}).get('tenant_id', None),
+    app=app,
+    storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
+    storage_options={"socket_connect_timeout": 30},
+    strategy="moving-window",  # or "moving-window"
+    on_breach=default_error_responder
+)
 
 app.config['UPLOAD_FOLDER'] = UPLOADS_FOLDER
 SERVER_URL = f"https://{os.environ.get('SERVER_URL')}/tika"
 
 
 # Create the ID token
-bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
+bearer_token = google_auth.impersonated_id_token(
+    serverurl=os.environ.get('SERVER_URL')).json()['token']
+
 
 def get_event_loop():
     try:
@@ -76,17 +77,19 @@ def get_event_loop():
         asyncio.set_event_loop(loop)
     return loop
 
+
 @app.route('/health', methods=['GET'], endpoint='health_check')
 def health_check():
     return json.dumps({"status": "ok"})
 
+
 @app.route('/extract', methods=['POST'])
-@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None), on_breach=default_error_responder)
 def extract_text():
     lang_value = request.form.get('lang', '')
     ocr_value = request.form.get('ocr', '')
     out = request.form.get('out_format', '')
-    
+
     # # Define mapping for lang_value
     # lang_mapping = {
     #     'hindi': 'hin',
@@ -108,9 +111,9 @@ def extract_text():
 
     # Set values based on conditions
     x_tika_ocr_language = lang_value
-    x_tika_pdf_ocr_strategy = 'no_ocr' if ocr_value.lower() == 'false' else ('ocr_only' if ocr_value.lower() == 'true' else default_ocr_strategy)
+    x_tika_pdf_ocr_strategy = 'no_ocr' if ocr_value.lower() == 'false' else (
+        'ocr_only' if ocr_value.lower() == 'true' else default_ocr_strategy)
     x_tika_accept = out_format_mapping.get(out, default_out_format)
-
 
     # Now you can use these values in your headers
     headers = {
@@ -126,18 +129,19 @@ def extract_text():
     content_type_header = request.headers.get('Content-Type')
     print(f"\nContent-Type Header: {content_type_header}")
 
-    contentType='application/pdf'
+    contentType = 'application/pdf'
     uploaded_file = request.files['file']
 
     if uploaded_file:
-        num_pages=0
+        num_pages = 0
         # Save the uploaded file to a temporary location
         filename = secure_filename(uploaded_file.filename)
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         print(uploaded_file.content_type)
-        
+
         oFileExtMap = {
-            "application/octet-stream": "use_extension", # use file extension if content type is octet-stream
+            # use file extension if content type is octet-stream
+            "application/octet-stream": "use_extension",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
             "application/pdf": "pdf",
             "application/vnd.oasis.opendocument.text": "odt",
@@ -208,9 +212,9 @@ def extract_text():
         if uploaded_file.content_type not in oFileExtMap:
             print('Invalid file extension')
             return 'Unsupported file format.', 400
-        
-        file_extension = oFileExtMap[ uploaded_file.content_type ]
-        
+
+        file_extension = oFileExtMap[uploaded_file.content_type]
+
         if file_extension == 'use_extension':
             file_extension = os.path.splitext(filename)[1][1:].lower()
 
@@ -226,7 +230,7 @@ def extract_text():
             pages, num_pages = file_processor.split_pdf(pdf_data)
             split_time = time.time() - start_time
             # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
-        
+
         elif file_extension in ['csv', 'xls', 'xltm', 'xltx', 'xlsx', 'tsv', 'ots']:
             pages = file_processor.split_excel(uploaded_file.read())
             num_pages = len(pages)
@@ -269,7 +273,7 @@ def extract_text():
         # num_cpus = multiprocessing.cpu_count()
         # log.info(num_cpus)
 
-        #Append Header value
+        # Append Header value
         headers['Content-Type'] = contentType
         headers['Authorization'] = f'Bearer {bearer_token}'
 
@@ -290,22 +294,30 @@ def extract_text():
 
         # if os.path.exists(temp_file_path):
         #     os.remove(temp_file_path)
-        #send CREDIT USAGE TO TOPIC 'structhub-credit-usage'
+        # send CREDIT USAGE TO TOPIC 'structhub-credit-usage'
 
-        #Build message for topic
+        # Build message for topic
+
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": num_pages
+            "username": getattr(request, 'tenant_data', {}).get('tenant_id'),
+            "user_id": getattr(request, 'tenant_data', {}).get('user_id'),
+            "project_id": getattr(request, 'tenant_data', {}).get('project_id'),
+            "creditsUsed": num_pages
         })
         log.info(f"Number of pages processed: {num_pages}")
         log.info(f"Message to topic: {message}")
-        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+
+        google_pub_sub.publish_messages_with_retry_settings(
+            GCP_PROJECT_ID,
+            GCP_CREDIT_USAGE_TOPIC,
+            message=message
+        )
         return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
 
     else:
         log.error('No file uploaded')
         return 'No file uploaded.', 400
+
 
 def convert_to_pdf(file_path, file_extension):
     import subprocess
@@ -344,16 +356,19 @@ def convert_to_pdf(file_path, file_extension):
         log.error(f'Error during PDF conversion: {str(e)}')
         return None
 
+
 async def process_pages_async(pages, headers):
     url = SERVER_URL
     async with aiohttp.ClientSession() as session:
-        tasks = [async_put_request(session, url, page_data, page_num, headers) for page_num, page_data in pages]
+        tasks = [async_put_request(
+            session, url, page_data, page_num, headers) for page_num, page_data in pages]
         results = await asyncio.gather(*tasks)
 
     # Map results to their corresponding page numbers
     mapped_results = [(result, page_num) for (result, page_num) in results]
 
     return mapped_results
+
 
 async def async_put_request(session, url, payload, page_num, headers, max_retries=10):
     retries = 0
@@ -363,12 +378,14 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
             payload_copy = io.BytesIO(payload.getvalue())
             async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=300)) as response:
                 if response.status == 429:
-                    print(f"Retrying request for page {page_num}, Retry #{retries + 1}")
+                    print(
+                        f"Retrying request for page {page_num}, Retry #{retries + 1}")
                     retries += 1
                     await asyncio.sleep(1)  # You may adjust the sleep duration
                     continue  # Retry the request
                 content = await response.read()  # Read the content of the response
-                text_content = content.decode('utf-8', errors='ignore')  # Decode bytes to Unicode text, ignoring errors
+                # Decode bytes to Unicode text, ignoring errors
+                text_content = content.decode('utf-8', errors='ignore')
                 return text_content, page_num
 
         except aiohttp.ClientError as e:
@@ -382,12 +399,14 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
             await asyncio.sleep(1)  # You may adjust the sleep duration
 
         except asyncio.TimeoutError:
-            print(f"Timeout error during request for page {page_num}. Retrying...")
+            print(
+                f"Timeout error during request for page {page_num}. Retrying...")
             retries += 1
             await asyncio.sleep(1)  # Adjust the sleep duration
 
     # If retries are exhausted, raise an exception or handle it as needed
-    raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
+    raise RuntimeError(
+        f"Failed after {max_retries} retries for page {page_num}")
 
 
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:
