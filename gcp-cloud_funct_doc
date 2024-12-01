@@ -1,1 +1,0 @@
-gcloud functions deploy credit-usage-function-stage -runtime python310 --trigger-topic your-pubsub-topic --set-secrets="postgresql-creds-stage=PSQL_PASSWORD_STAGE:1" --update-env-vars PSQL_PASSWORD=Cmws3Iv84bjXmVu,PSQL_HOST=149.248.202.178,PSQL_PORT=5432,PSQL_USERNAME=postgres --entry-point credit-usage-function.pubsub_to_postgresql
