@@ -156,17 +156,16 @@ vertexchat = ChatVertexAI(model="gemini-1.5-pro", safety_settings={
 vertexchat_stream = ChatVertexAI(model="gemini-1.5-pro", response_mime_type="application/json", safety_settings={
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
     })
-def verify_api_key():
-    api_key_header = request.headers.get('API-KEY')
-    res = security.api_key_required(api_key_header)
-    return res
-
-
 @app.before_request
 def before_request():
-    log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'geminichat' or request.endpoint == 'anthropic' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna' or request.endpoint =='chatmr') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
-        valid = verify_api_key()
+    log.info(f"Request endpoint: {request.endpoint}")
+    protected_endpoints = [
+        'extract', 'search', 'chat', 'groqchat', 'geminichat',
+        'anthropic', 'serp', 'webextract', 'qna', 'chatmr'
+    ]
+    if request.endpoint in protected_endpoints and request.method != 'OPTIONS':
+        api_key_header = request.headers.get('API-KEY')
+        valid = security.api_key_required(api_key_header)
         if not valid:
             return Response(status=401)
         
@@ -175,7 +174,7 @@ def default_error_responder(request_limit: RequestLimit):
     return Response(status=429)
 
 limiter = Limiter(
-        key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        key_func=lambda: getattr(request, 'tenant_data', {}).get('subscription_id', None),
         app=app,
         storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
         storage_options={"socket_connect_timeout": 30},
@@ -357,7 +356,10 @@ def extract():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": chargeable_credits
         })
         log.info(f"Number of pages processed: {num_pages}")
@@ -521,7 +523,10 @@ def search():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.1
         })
         log.info(f"Number of pages processed: {count}")
@@ -632,7 +637,10 @@ def serp():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
         })
         log.info(f"Number of pages processed: {count}")
@@ -730,7 +738,10 @@ def webextract():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
@@ -807,7 +818,10 @@ async def getVectorStoreDocs(request):
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
         })
         log.info(f"Number of pages processed: {count}")
@@ -923,7 +937,10 @@ async def getWebExtract(request):
         # Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-            "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+            "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+            "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+            "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+            "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
             "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
@@ -1132,7 +1149,10 @@ async def getWebExtractLCFormat(request):
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count
         })
         log.info(f"Number of pages processed: {count}")
