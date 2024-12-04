@@ -357,7 +357,7 @@ def extract():
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": chargeable_credits
@@ -524,7 +524,7 @@ def search():
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.1
@@ -638,7 +638,7 @@ def serp():
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
@@ -739,7 +739,7 @@ def webextract():
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.3
@@ -819,7 +819,7 @@ async def getVectorStoreDocs(request):
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
@@ -938,7 +938,7 @@ async def getWebExtract(request):
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
             "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-            "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+            "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
             "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
             "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
             "creditsUsed": count * 0.3
@@ -1150,7 +1150,7 @@ async def getWebExtractLCFormat(request):
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('uer_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count

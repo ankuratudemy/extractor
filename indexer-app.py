@@ -2,23 +2,30 @@ import os
 import io
 from flask import Flask, request
 from google.cloud import storage
+from flask_limiter import Limiter, RequestLimit
 from vertexai.preview.language_models import TextEmbeddingModel
 from werkzeug.utils import secure_filename
 from shared import file_processor, google_auth, security, google_pub_sub, psql
+from types import FrameType
 import json
-import asyncio
+import concurrent.futures
+import multiprocessing
 import time
 from datetime import datetime
 import sys
+import tempfile
+import requests
+import aiohttp
+import asyncio
+import threading
+import traceback
 import ssl
 import signal
 from pinecone import Pinecone
-import hashlib  # Import hashlib for MD5 hashing
 sys.path.append('../')
 from shared.logging_config import log
-
 app = Flask(__name__)
-app.debug = True
+app.debug=True
 
 # Other environment-specific variables
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
@@ -126,8 +133,6 @@ def event_handler():
 
         print(f"\nContent-Type: {content_type_header}")
 
-        contentType = 'application/pdf'
-
         if file_name_only:
             num_pages = 0
             # Update File status using file_id
@@ -135,17 +140,80 @@ def event_handler():
 
             # Your existing file extension mapping code here
             oFileExtMap = {
-                # ... (existing mappings)
+                "application/octet-stream": "use_extension", # use file extension if content type is octet-stream
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                "application/pdf": "pdf",
+                "application/vnd.oasis.opendocument.text": "odt",
+                "application/vnd.oasis.opendocument.spreadsheet": "ods",
+                "application/vnd.oasis.opendocument.presentation": "odp",
+                "application/vnd.oasis.opendocument.graphics": "odg",
+                "application/vnd.oasis.opendocument.formula": "odf",
+                "application/vnd.oasis.opendocument.flat.text": "fodt",
+                "application/vnd.oasis.opendocument.flat.presentation": "fodp",
+                "application/vnd.oasis.opendocument.flat.graphics": "fodg",
+                "application/vnd.oasis.opendocument.spreadsheet-template": "ots",
+                "application/vnd.oasis.opendocument.flat.spreadsheet-template": "fots",
+                "application/vnd.lotus-1-2-3": "123",
+                "application/dbase": "dbf",
+                "text/html": "html",
+                "application/vnd.lotus-screencam": "scm",
+                "text/csv": "csv",
+                "application/vnd.ms-excel": "xls",
+                "application/vnd.ms-excel.template.macroenabled.12": "xltm",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.template": 'dotx',
+                "application/vnd.ms-word.document.macroenabled.12": 'docm',
+                "application/vnd.ms-word.template.macroenabled.12": 'dotm',
+                "application/xml": 'xml',
+                "application/msword": 'doc',
+                "application/vnd.ms-word.document.macroenabled.12": 'docm',
+                "application/vnd.ms-word.template.macroenabled.12": 'dotm',
+                "application/rtf": 'rtf',
+                "application/wordperfect": 'wpd',
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 'xlsx',
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.template": 'xltx',
+                "application/vnd.ms-excel.sheet.macroenabled.12": 'xlsm',
+                "application/vnd.ms-excel.template.macroenabled.12": 'xltm',
+                "application/vnd.corelqpw": 'qpw',
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation": 'pptx',
+                "application/vnd.openxmlformats-officedocument.presentationml.slideshow": 'ppsx',
+                "application/vnd.openxmlformats-officedocument.presentationml.slide": 'ppmx',
+                "application/vnd.openxmlformats-officedocument.presentationml.template": 'potx',
+                "application/vnd.ms-powerpoint": 'ppt',
+                "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
+                "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
+                "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
+                "application/vnd.ms-powerpoint.slideshow.macroenabled.12": 'ppsm',
+                "application/vnd.ms-powerpoint.presentation.macroenabled.12": 'pptm',
+                "application/vnd.ms-powerpoint.addin.macroenabled.12": 'ppam',
+                "application/vnd.ms-powerpoint": 'ppt',
+                "application/vnd.ms-powerpoint.slideshow": 'pps',
+                "application/vnd.ms-powerpoint.presentation": 'ppt',
+                "application/vnd.ms-powerpoint.addin": 'ppa',
+                # Email formats
+                "message/rfc822": 'eml',  # EML format
+                "application/vnd.ms-outlook": 'msg',  # MSG format
+                "application/mbox": 'mbox',  # MBOX format
+                "application/vnd.ms-outlook": 'pst',  # PST format
+                "application/ost": 'ost',  # OST format
+                "application/emlx": 'emlx',  # EMLX format
+                "application/dbx": 'dbx',  # DBX format
+                "application/dat": 'dat',  # Windows Mail (.dat) format
+                # Image formats
+                "image/jpeg": 'jpg',  # JPEG format
+                "image/png": 'png',  # PNG format
+                "image/gif": 'gif',  # GIF format
+                "image/tiff": 'tiff',  # TIFF format
+                "image/bmp": 'bmp'  # BMP format
             }
             # Reverse mapping of content types to file extensions
             reverse_file_ext_map = {v: k for k, v in oFileExtMap.items()}
-
+            contentType = content_type_header
             if content_type_header not in oFileExtMap:
                 print('Invalid file extension')
                 return 'Unsupported file format.', 400
-
-            file_extension = oFileExtMap[content_type_header]
-
+            
+            file_extension = oFileExtMap[ content_type_header ]
+            
             if file_extension == 'use_extension':
                 file_extension = os.path.splitext(filename)[1][1:].lower()
 
@@ -154,6 +222,7 @@ def event_handler():
 
             if file_extension == 'pdf':
                 # Read the PDF file directly from memory
+                # Read the file content as a buffer
                 with open(temp_file_path, 'rb') as f:
                     pdf_data = f.read()
 
@@ -161,13 +230,50 @@ def event_handler():
                 start_time = time.time()
                 pages, num_pages = file_processor.split_pdf(pdf_data)
                 split_time = time.time() - start_time
+                # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
+            
             elif file_extension in ['csv', 'xls', 'xltm', 'xltx', 'xlsx', 'tsv', 'ots']:
                 with open(temp_file_path, 'rb') as f:
                     excel_data = f.read()
                 pages = file_processor.split_excel(excel_data)
                 num_pages = len(pages)
                 contentType = reverse_file_ext_map.get(file_extension, '')
-            # ... (other file formats)
+
+            elif file_extension in ['eml', 'msg', 'pst', 'ost', 'mbox', 'dbx', 'dat', 'emlx', ]:
+                with open(temp_file_path, 'rb') as f:
+                    email_data = f.read()
+                pages = [("1", io.BytesIO(email_data))]
+                num_pages = len(pages)
+                contentType = reverse_file_ext_map.get(file_extension, '')
+
+            elif file_extension in ['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp']:
+                with open(temp_file_path, 'rb') as f:
+                    image_data = f.read()
+                pages = [("1", io.BytesIO(image_data))]
+                num_pages = len(pages)
+                contentType = reverse_file_ext_map.get(file_extension, '')
+
+            elif file_extension in ['ods']:
+                with open(temp_file_path, 'rb') as f:
+                    ods_data = f.read()
+                pages = file_processor.split_ods(ods_data)
+                num_pages = len(pages)
+                contentType = reverse_file_ext_map.get(file_extension, '')
+
+            elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'html', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
+                # Convert the file to PDF using LibreOffice
+                pdf_data = convert_to_pdf(temp_file_path, file_extension)
+
+                if pdf_data:
+                    # Measure the time taken to split the PDF
+                    start_time = time.time()
+                    pages, num_pages = file_processor.split_pdf(pdf_data)
+                    split_time = time.time() - start_time
+                    # log.info(f"Time taken to split the PDF: {split_time * 1000} ms")
+                    contentType = reverse_file_ext_map.get(file_extension, '')
+                else:
+                    log.error('Conversion to PDF failed')
+                    return 'Conversion to PDF failed.', 400
             else:
                 log.error('Unsupported file format')
                 return 'Unsupported file format.', 400

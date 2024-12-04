@@ -5,6 +5,8 @@ import base64
 import psycopg2
 import redis
 import time
+import uuid
+
 
 # Retrieve PostgreSQL connection parameters from environment variables
 db_params = {
@@ -76,8 +78,8 @@ def pubsub_to_postgresql(event, context):
 
                     # Insert into CreditUsage table
                     cursor.execute(
-                        'INSERT INTO "CreditUsage" ("creditsUsed", "timestamp", "subscriptionId", "projectId", "userId") VALUES (%s, NOW(), %s, %s, %s)',
-                        (credits_used, subscription_id, project_id, user_id)
+                        'INSERT INTO "CreditUsage" ("id","creditsUsed", "timestamp", "subscriptionId", "projectId", "userId") VALUES (%s, %s, NOW(), %s, %s, %s)',
+                        (str(uuid.uuid4()),credits_used, subscription_id, project_id, user_id)
                     )
 
                     # Update Subscription table (subtract creditsUsed from remainingCredits)
