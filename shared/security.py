@@ -84,7 +84,9 @@ def api_key_required(token):
         return False
 
     tenant_data = validate_api_key(api_key)
+    print(f"tenant data is {tenant_data}")
     if tenant_data is False:
+        print(f"tenant data is False")
         return False
     request.tenant_data = tenant_data
     return True

@@ -461,7 +461,10 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
 def search():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        projectId = getattr(request, 'tenant_data', {}).get('project_id', None)
+        namespace = projectId
         log.info(f"user_id {userId}")
+        log.info(f"project id to search(namespace) {projectId}")
         if not userId:
             return 'invalid request', 400
     
@@ -503,7 +506,7 @@ def search():
     try:
         # Search Vector DB
         docs = index.query(
-            namespace=str(userId),
+            namespace=str(namespace),
             vector=embeddings[0],
             top_k=topk,
             include_values=False,
@@ -585,6 +588,7 @@ async def async_get_request(session, url, params, headers=None, max_retries=10):
     raise RuntimeError(f"Failed after {max_retries} retries for websearch")
 
 @app.route('/serp', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def serp():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
@@ -653,6 +657,7 @@ def serp():
         return 'Websearch call: Something went wrong', 500
 
 @app.route('/webextract', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def webextract():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
@@ -757,7 +762,10 @@ def webextract():
 async def getVectorStoreDocs(request):
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        projectId = getattr(request, 'tenant_data', {}).get('project_id', None)
+        namespace = projectId
         log.info(f"user_id {userId}")
+        log.info(f"project id to search(namespace) {projectId}")
         if not userId:
             raise Exception("invalid request")
     
@@ -798,7 +806,7 @@ async def getVectorStoreDocs(request):
     try:
         # Search Vector DB
         docs = index.query(
-            namespace=str(userId),
+            namespace=str(namespace),
             vector=embeddings[0],
             top_k=topk,
             include_values=False,
@@ -1209,6 +1217,7 @@ def chat_gpt_helper(client, prompt):
         yield str(e)
     
 @app.route('/chat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def chat():
     try:
         loop = asyncio.new_event_loop()
@@ -1231,6 +1240,7 @@ def chat():
         return str(e)
     
 @app.route('/qna', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def qna():
     try:
         
@@ -1330,6 +1340,7 @@ def split_data(data, chunk_size):
 
 
 @app.route('/groqchat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def groqchat():
     try:
         docData = asyncio.run(getVectorStoreDocs(request))
@@ -1366,6 +1377,7 @@ def groqchat():
         return str(e)
 
 @app.route('/geminichat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def geminichat():
     try:
         data = request.get_json()
@@ -1410,6 +1422,7 @@ def geminichat():
 
 
 @app.route('/anthropic', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def anthropic():
     try:
         data = request.get_json()
@@ -1456,6 +1469,7 @@ def anthropic():
         return str(e)
 
 @app.route('/chatmr', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def chatmr():
     try:
         data = request.get_json()
