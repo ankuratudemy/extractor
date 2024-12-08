@@ -8,7 +8,7 @@ import os
 import json
 import hashlib
 import time
-
+from shared.logging_config import log
 MAX_RETRIES = 5
 
 # Assuming you have a Redis connection details
@@ -23,14 +23,16 @@ def validate_api_key(api_key):
     while retries < MAX_RETRIES:
         try:
             redis_conn = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
-            tenant_id = redis_conn.get(api_key)
-            credits_remaining = redis_conn.get(f"{tenant_id}_credits_remaining")
+            subscription_id = redis_conn.get(api_key)
+            credits_remaining = redis_conn.get(f"subscription_{subscription_id}_credits_remaining")
+            log.info(f"Credits Remaining {credits_remaining}")
             if not credits_remaining:
                 return False
             if float(credits_remaining) <= 0:
                 print(f"No credits left")
                 return False
-            if tenant_id is not None:
+            if subscription_id is not None:
+                log.info(f"Subscription ID {subscription_id}")
                 redis_conn.close()
                 tenant_data = decode_api_key(api_key)
                 return tenant_data
@@ -54,6 +56,7 @@ def decode_api_key(encoded_key):
     try:
         encoded_data, signature = encoded_key.rsplit('.', 1)
         decoded_data = decode(encoded_data)
+        log.info(f"decoded_data {decoded_data}")
         calculated_signature = hashlib.sha256(f"{decoded_data}{SECRET_KEY}".encode()).hexdigest()
 
         if calculated_signature == signature:
@@ -81,7 +84,9 @@ def api_key_required(token):
         return False
 
     tenant_data = validate_api_key(api_key)
+    print(f"tenant data is {tenant_data}")
     if tenant_data is False:
+        print(f"tenant data is False")
         return False
     request.tenant_data = tenant_data
     return True

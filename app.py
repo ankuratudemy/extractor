@@ -156,17 +156,16 @@ vertexchat = ChatVertexAI(model="gemini-1.5-pro", safety_settings={
 vertexchat_stream = ChatVertexAI(model="gemini-1.5-pro", response_mime_type="application/json", safety_settings={
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
     })
-def verify_api_key():
-    api_key_header = request.headers.get('API-KEY')
-    res = security.api_key_required(api_key_header)
-    return res
-
-
 @app.before_request
 def before_request():
-    log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'geminichat' or request.endpoint == 'anthropic' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna' or request.endpoint =='chatmr') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
-        valid = verify_api_key()
+    log.info(f"Request endpoint: {request.endpoint}")
+    protected_endpoints = [
+        'extract', 'search', 'chat', 'groqchat', 'geminichat',
+        'anthropic', 'serp', 'webextract', 'qna', 'chatmr'
+    ]
+    if request.endpoint in protected_endpoints and request.method != 'OPTIONS':
+        api_key_header = request.headers.get('API-KEY')
+        valid = security.api_key_required(api_key_header)
         if not valid:
             return Response(status=401)
         
@@ -175,7 +174,7 @@ def default_error_responder(request_limit: RequestLimit):
     return Response(status=429)
 
 limiter = Limiter(
-        key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        key_func=lambda: getattr(request, 'tenant_data', {}).get('subscription_id', None),
         app=app,
         storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
         storage_options={"socket_connect_timeout": 30},
@@ -357,7 +356,10 @@ def extract():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": chargeable_credits
         })
         log.info(f"Number of pages processed: {num_pages}")
@@ -459,7 +461,10 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
 def search():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        projectId = getattr(request, 'tenant_data', {}).get('project_id', None)
+        namespace = projectId
         log.info(f"user_id {userId}")
+        log.info(f"project id to search(namespace) {projectId}")
         if not userId:
             return 'invalid request', 400
     
@@ -501,7 +506,7 @@ def search():
     try:
         # Search Vector DB
         docs = index.query(
-            namespace=str(userId),
+            namespace=str(namespace),
             vector=embeddings[0],
             top_k=topk,
             include_values=False,
@@ -521,7 +526,10 @@ def search():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.1
         })
         log.info(f"Number of pages processed: {count}")
@@ -580,6 +588,7 @@ async def async_get_request(session, url, params, headers=None, max_retries=10):
     raise RuntimeError(f"Failed after {max_retries} retries for websearch")
 
 @app.route('/serp', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def serp():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
@@ -632,7 +641,10 @@ def serp():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
         })
         log.info(f"Number of pages processed: {count}")
@@ -645,6 +657,7 @@ def serp():
         return 'Websearch call: Something went wrong', 500
 
 @app.route('/webextract', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def webextract():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
@@ -730,7 +743,10 @@ def webextract():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
@@ -746,7 +762,10 @@ def webextract():
 async def getVectorStoreDocs(request):
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        projectId = getattr(request, 'tenant_data', {}).get('project_id', None)
+        namespace = projectId
         log.info(f"user_id {userId}")
+        log.info(f"project id to search(namespace) {projectId}")
         if not userId:
             raise Exception("invalid request")
     
@@ -787,7 +806,7 @@ async def getVectorStoreDocs(request):
     try:
         # Search Vector DB
         docs = index.query(
-            namespace=str(userId),
+            namespace=str(namespace),
             vector=embeddings[0],
             top_k=topk,
             include_values=False,
@@ -807,7 +826,10 @@ async def getVectorStoreDocs(request):
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
         })
         log.info(f"Number of pages processed: {count}")
@@ -923,7 +945,10 @@ async def getWebExtract(request):
         # Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-            "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+            "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+            "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+            "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+            "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
             "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
@@ -1132,7 +1157,10 @@ async def getWebExtractLCFormat(request):
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count
         })
         log.info(f"Number of pages processed: {count}")
@@ -1189,6 +1217,7 @@ def chat_gpt_helper(client, prompt):
         yield str(e)
     
 @app.route('/chat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def chat():
     try:
         loop = asyncio.new_event_loop()
@@ -1211,6 +1240,7 @@ def chat():
         return str(e)
     
 @app.route('/qna', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def qna():
     try:
         
@@ -1310,6 +1340,7 @@ def split_data(data, chunk_size):
 
 
 @app.route('/groqchat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def groqchat():
     try:
         docData = asyncio.run(getVectorStoreDocs(request))
@@ -1346,6 +1377,7 @@ def groqchat():
         return str(e)
 
 @app.route('/geminichat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def geminichat():
     try:
         data = request.get_json()
@@ -1390,6 +1422,7 @@ def geminichat():
 
 
 @app.route('/anthropic', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def anthropic():
     try:
         data = request.get_json()
@@ -1404,12 +1437,28 @@ def anthropic():
         if 'web' in sources:
             webData = asyncio.run(getWebExtract(request))
         # prepare input data for the model
+        # raw_context = (
+        #     f"""
+        #             You are a helpful assistant.
+        #             Always respond to the user's question with a JSON object containing three keys:
+        #             - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
+        #             - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+        #             - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+        #             Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+        #             DO NOT use your existing information and only use the information provided below to generate fial answer.
+        #             Use this data from web search {webData} and from the private knowledge store {docData}, which always have source information including file page, page number, and URL.
+
+        #             Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
+        #             """
+        # )
+        
         raw_context = (
             f"""
                     You are a helpful assistant.
                     Always respond to the user's question with a JSON object containing three keys:
                     - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
-                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include  a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
                     - `followup_question`: This key should contain a follow-up question relevant to the user's query.
 
                     Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
@@ -1419,6 +1468,7 @@ def anthropic():
                     Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
                     """
         )
+
         question = (
             f"{query}"
         )
@@ -1436,6 +1486,7 @@ def anthropic():
         return str(e)
 
 @app.route('/chatmr', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def chatmr():
     try:
         data = request.get_json()
