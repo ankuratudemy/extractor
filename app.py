@@ -1437,12 +1437,28 @@ def anthropic():
         if 'web' in sources:
             webData = asyncio.run(getWebExtract(request))
         # prepare input data for the model
+        # raw_context = (
+        #     f"""
+        #             You are a helpful assistant.
+        #             Always respond to the user's question with a JSON object containing three keys:
+        #             - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
+        #             - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+        #             - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+        #             Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+        #             DO NOT use your existing information and only use the information provided below to generate fial answer.
+        #             Use this data from web search {webData} and from the private knowledge store {docData}, which always have source information including file page, page number, and URL.
+
+        #             Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
+        #             """
+        # )
+        
         raw_context = (
             f"""
                     You are a helpful assistant.
                     Always respond to the user's question with a JSON object containing three keys:
                     - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
-                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include  a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
                     - `followup_question`: This key should contain a follow-up question relevant to the user's query.
 
                     Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
@@ -1452,6 +1468,7 @@ def anthropic():
                     Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
                     """
         )
+
         question = (
             f"{query}"
         )
