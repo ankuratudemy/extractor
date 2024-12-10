@@ -34,7 +34,7 @@ callbacks = [FinalStreamingStdOutCallbackHandler()]
 from vertexai.preview.language_models import TextEmbeddingModel
 from urllib.parse import urlencode
 import json
-from shared import file_processor, google_auth, security, google_pub_sub
+from shared import file_processor, google_auth, security, google_pub_sub, search_helper
 from types import FrameType
 import json
 import time
@@ -766,13 +766,13 @@ async def getVectorStoreDocs(request):
         namespace = projectId
         log.info(f"user_id {userId}")
         log.info(f"project id to search(namespace) {projectId}")
+
         if not userId:
             raise Exception("invalid request")
-    
-        # Check if request body contains the required parameters
+
         if not request.is_json:
             raise Exception("invalid request")
-        
+
         data = request.get_json()
         log.info(data)
         if 'topk' not in data or 'q' not in data:
@@ -782,14 +782,17 @@ async def getVectorStoreDocs(request):
             if 'q' not in data:
                 missing_params.append('q')
             return f"Missing required parameters: {', '.join(missing_params)}", 400
-        
+
         topk = data['topk']
         query = data['q']
+        history = data.get('history', [])
         log.info(f"query: {query} topk: {topk}")
+
     except Exception as e:
         log.info(str(e))
         raise Exception(str(e))
-    
+
+    # Setup Pinecone Index
     try:
         pc = PC(api_key=PINECONE_API_KEY)
         index = pc.Index(name=PINECONE_INDEX_NAME)
@@ -797,44 +800,93 @@ async def getVectorStoreDocs(request):
         log.info(str(e))
         raise Exception(str(e))
 
+    # Generate multiple queries
     try:
-        embeddings = await get_google_embedding(queries=[query])
+        multi_query_prompt = search_helper.create_multi_query_prompt(history, query)
+        # Using a synchronous call, if anthropic_chat.stream is not suitable here
+        # If needed, you can do anthropic_chat.completion(...) etc.
+        # We'll assume anthropic_chat can run synchronously for simplicity
+        multi_query_resp = anthropic_chat.invoke(
+            input=multi_query_prompt
+        ).content
+        # multi_query_resp should contain the generated queries separated by newlines
+        all_queries = [q.strip() for q in multi_query_resp.split('\n') if q.strip()]
+        log.info(f"Generated Queries: {all_queries}")
+
+        # The last query is keyword-only query
+        # If the last query is meant to be keywords in a single string or array, parse them
+        # We'll assume it's either a string or JSON list:
+        keyword_query = all_queries[-1]
+        # If keyword_query is like ["France"], parse it
+        try:
+            keywords = json.loads(keyword_query)
+            if not isinstance(keywords, list):
+                keywords = [keyword_query]
+        except:
+            # Not a valid JSON list, just treat the entire query as a keyword string
+            # Split by comma or space if needed
+            keywords = [keyword_query]
+
+        search_queries = all_queries[:-1] + keywords  # incorporate the keyword query as well
+
+    except Exception as e:
+        log.error(str(e))
+        raise Exception("Failed to generate multiple queries")
+
+    # Get embeddings for all queries
+    try:
+        embeddings_list = await get_google_embedding(queries=search_queries)
     except Exception as e:
         log.error(str(e))
         raise Exception(str(e))
 
+    # Perform Pinecone searches for each query
+    all_matches = []
     try:
-        # Search Vector DB
-        docs = index.query(
-            namespace=str(namespace),
-            vector=embeddings[0],
-            top_k=topk,
-            include_values=False,
-            include_metadata=True,
-            # filter={
-            #     "genre": {"$in": ["comedy", "documentary", "drama"]}
-            # }
-        )
-        log.info(f"Docs: {docs.to_dict()}")
-        doc_list = [{'source': match['metadata']['source'], 'page': match['metadata']['page'], 'text': match['metadata']['text']} for match in docs.to_dict()['matches']]
+        for sq, emb in zip(search_queries, embeddings_list):
+            docs = index.query(
+                namespace=str(namespace),
+                vector=emb,
+                top_k=topk,
+                include_values=False,
+                include_metadata=True
+            ).to_dict().get('matches', [])
+            all_matches.extend(docs)
+
+        # Deduplicate based on doc id
+        unique_docs = {}
+        for doc in all_matches:
+            doc_id = doc['id']
+            if doc_id not in unique_docs:
+                unique_docs[doc_id] = doc
+
+        final_docs = list(unique_docs.values())
+        # Convert final_docs to required format
+        doc_list = []
+        for match in final_docs:
+            doc_list.append({
+                'source': match['metadata']['source'],
+                'page': match['metadata']['page'],
+                'text': match['metadata']['text']
+            })
+
+        # Reorder docs based on regex keyword matches
+        doc_list = await search_helper.reorder_docs(doc_list, keywords)
+
         count = len(doc_list)
         final_response = {
             'count': count,
             'data': doc_list
         }
         json_string = json.dumps(final_response, indent=4)
-        #Build message for topic
-        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        # Publish usage message
         message = json.dumps({
-        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
-        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
-        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
-        "creditsUsed": count * 0.2
+            "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+            "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+            "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+            "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
+            "creditsUsed": count * 0.2
         })
-        log.info(f"Number of pages processed: {count}")
-        log.info(f"Message to topic: {message}")
-        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         return json.dumps(doc_list)
     except Exception as e:
@@ -1221,7 +1273,7 @@ def chat_gpt_helper(client, prompt):
 def chat():
     try:
         loop = asyncio.new_event_loop()
-        docData = loop.run_until_complete(getVectorStoreDocs(request))
+        docData = loop.run_until_complete(search_helper.getVectorStoreDocs(request))
         webData = loop.run_until_complete(getWebExtract(request))
         
         # Prepare the prompt
@@ -1428,6 +1480,7 @@ def anthropic():
         data = request.get_json()
         query = data.get('q')
         sources = data.get('sources', [])
+        history = data.get('history', [])
 
         docData = []
         webData = []
@@ -1436,23 +1489,7 @@ def anthropic():
             docData = asyncio.run(getVectorStoreDocs(request))
         if 'web' in sources:
             webData = asyncio.run(getWebExtract(request))
-        # prepare input data for the model
-        # raw_context = (
-        #     f"""
-        #             You are a helpful assistant.
-        #             Always respond to the user's question with a JSON object containing three keys:
-        #             - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
-        #             - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
-        #             - `followup_question`: This key should contain a follow-up question relevant to the user's query.
 
-        #             Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
-        #             DO NOT use your existing information and only use the information provided below to generate fial answer.
-        #             Use this data from web search {webData} and from the private knowledge store {docData}, which always have source information including file page, page number, and URL.
-
-        #             Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
-        #             """
-        # )
-        
         raw_context = (
             f"""
                     You are a helpful assistant.
@@ -1469,9 +1506,7 @@ def anthropic():
                     """
         )
 
-        question = (
-            f"{query}"
-        )
+        question = f"{query}"
         context = SystemMessage(content=raw_context)
         message = HumanMessage(content=question)
 
