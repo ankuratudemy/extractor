@@ -790,7 +790,7 @@ async def getVectorStoreDocs(request):
 
     except Exception as e:
         log.info(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
     # Setup Pinecone Index
     try:
@@ -798,7 +798,7 @@ async def getVectorStoreDocs(request):
         index = pc.Index(name=PINECONE_INDEX_NAME)
     except Exception as e:
         log.info(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
     # Generate multiple queries
     try:
@@ -831,14 +831,14 @@ async def getVectorStoreDocs(request):
 
     except Exception as e:
         log.error(str(e))
-        raise Exception("Failed to generate multiple queries")
+        raise Exception("There was an issue generating the answer. Please retry")
 
     # Get embeddings for all queries
     try:
         embeddings_list = await get_google_embedding(queries=search_queries)
     except Exception as e:
         log.error(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
     # Perform Pinecone searches for each query
     all_matches = []
@@ -874,11 +874,11 @@ async def getVectorStoreDocs(request):
         doc_list = await search_helper.reorder_docs(doc_list, keywords)
 
         count = len(doc_list)
-        final_response = {
-            'count': count,
-            'data': doc_list
-        }
-        json_string = json.dumps(final_response, indent=4)
+        # final_response = {
+        #     'count': count,
+        #     'data': doc_list
+        # }
+        # json_string = json.dumps(final_response, indent=4)
         # Publish usage message
         message = json.dumps({
             "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
@@ -891,7 +891,7 @@ async def getVectorStoreDocs(request):
         return json.dumps(doc_list)
     except Exception as e:
         log.error(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
 async def getWebExtract(request):
     try:
@@ -1518,7 +1518,7 @@ def anthropic():
         return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
     except Exception as e:
         log.error(str(e))
-        return str(e)
+        raise Exception("There was an issue generating the answer. Please retry")
 
 @app.route('/chatmr', methods=['POST'])
 @limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
