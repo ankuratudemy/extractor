@@ -24,3 +24,4 @@ openai
 pyarmor
 cython
 psycopg2-binary
+tiktoken
