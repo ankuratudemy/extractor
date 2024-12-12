@@ -93,7 +93,7 @@ async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
     model = TextEmbeddingModel.from_pretrained(embedder_name)
     log.info(f"Getting embeddings for {len(queries)} queries.")
-    embeddings_list = model.get_embeddings(texts=queries, auto_truncate=False)
+    embeddings_list = model.get_embeddings(texts=queries, auto_truncate=True)
     embeddings = [embedding.values for embedding in embeddings_list]
     log.info("Embeddings fetched successfully.")
     return embeddings
