@@ -213,6 +213,11 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
 
     log.info("Creating and uploading embeddings with new constraints.")
     for text_content, page_num in results:
+        # Add check for empty text
+        if not text_content.strip():
+            log.info(f"Skipping embedding for empty text in page {page_num}")
+            continue
+
         content_len = len(text_content)
         log.info(f"Processing text from page {page_num}, length {content_len} chars.")
         # Chunk into <=2048 token chunks
@@ -239,7 +244,7 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
                     # then we have a single chunk exceeding limits - theoretically not possible given chunk_text.
                     log.warning("Single chunk exceeds allowed tokens or texts, but chunk_text guarantees <=2048 tokens. "
                                 "Check logic if this warning appears.")
-            
+
             # Now we can add the chunk to the batch safely
             # (because if it was violating limits, we already processed and cleared the batch)
             if (batch_text_count + 1 <= max_batch_texts) and (batch_token_count + chunk_token_len <= max_batch_tokens):
@@ -431,15 +436,17 @@ def event_handler():
             contentType = reverse_file_ext_map.get(file_extension, '')
             del ods_data
 
-        else:
+        elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
             pdf_data = convert_to_pdf(temp_file_path, file_extension)
+
             if pdf_data:
                 pages, num_pages = file_processor.split_pdf(pdf_data)
-                del pdf_data
-                contentType = reverse_file_ext_map.get(file_extension, '')
             else:
                 log.error('Conversion to PDF failed')
                 return 'Conversion to PDF failed.', 400
+        else:
+            log.error('Unsupported file format')
+            return 'Unsupported file format.', 400
 
         # Remove the original file from disk once we're done
         if os.path.exists(temp_file_path):
@@ -454,12 +461,18 @@ def event_handler():
         results = loop.run_until_complete(process_pages_async(pages, headers, filename, namespace=project_id, file_id=file_id))
 
         json_output = []
+        processed_pages = 0  # To track non-empty pages
+
         for result, page_num in results:
+            if not result.strip():
+                log.info(f"Skipping empty text in page {page_num} for JSON output.")
+                continue
             page_obj = {
                 'page': page_num,
                 'text': result.strip()
             }
             json_output.append(page_obj)
+            processed_pages += 1
 
         json_string = json.dumps(json_output, indent=4)
         log.info(f"Extraction successful for file: {filename}")
@@ -468,13 +481,13 @@ def event_handler():
             "subscription_id": subscription_id,
             "user_id": user_id,
             "project_id": project_id,
-            "creditsUsed": num_pages
+            "creditsUsed": processed_pages  # Use processed_pages instead of num_pages
         })
-        log.info(f"Number of pages processed: {num_pages}")
+        log.info(f"Number of pages processed: {processed_pages}")
         log.info(f"Message to topic: {message}")
         google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
 
-        psql.update_file_status(id=file_id, status="processed", page_nums=num_pages, updatedAt=datetime.now())
+        psql.update_file_status(id=file_id, status="processed", page_nums=processed_pages, updatedAt=datetime.now())
         return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
 
     else:
