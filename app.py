@@ -43,6 +43,7 @@ import aiohttp
 import asyncio
 import ssl
 import signal
+import tiktoken
 
 sys.path.append('../')
 from shared.logging_config import log
@@ -803,31 +804,19 @@ async def getVectorStoreDocs(request):
     # Generate multiple queries
     try:
         multi_query_prompt = search_helper.create_multi_query_prompt(history, query)
-        # Using a synchronous call, if anthropic_chat.stream is not suitable here
-        # If needed, you can do anthropic_chat.completion(...) etc.
-        # We'll assume anthropic_chat can run synchronously for simplicity
-        multi_query_resp = anthropic_chat.invoke(
-            input=multi_query_prompt
-        ).content
-        # multi_query_resp should contain the generated queries separated by newlines
+        multi_query_resp = anthropic_chat.invoke(input=multi_query_prompt).content
         all_queries = [q.strip() for q in multi_query_resp.split('\n') if q.strip()]
         log.info(f"Generated Queries: {all_queries}")
 
-        # The last query is keyword-only query
-        # If the last query is meant to be keywords in a single string or array, parse them
-        # We'll assume it's either a string or JSON list:
         keyword_query = all_queries[-1]
-        # If keyword_query is like ["France"], parse it
         try:
             keywords = json.loads(keyword_query)
             if not isinstance(keywords, list):
                 keywords = [keyword_query]
         except:
-            # Not a valid JSON list, just treat the entire query as a keyword string
-            # Split by comma or space if needed
             keywords = [keyword_query]
 
-        search_queries = all_queries[:-1] + keywords  # incorporate the keyword query as well
+        search_queries = all_queries[:-1] + keywords
 
     except Exception as e:
         log.error(str(e))
@@ -873,13 +862,34 @@ async def getVectorStoreDocs(request):
         # Reorder docs based on regex keyword matches
         doc_list = await search_helper.reorder_docs(doc_list, keywords)
 
-        count = len(doc_list)
-        # final_response = {
-        #     'count': count,
-        #     'data': doc_list
-        # }
-        # json_string = json.dumps(final_response, indent=4)
-        # Publish usage message
+        # Now pick up to topk docs without exceeding 50k tokens
+        enc = tiktoken.get_encoding("cl100k_base")
+        max_tokens = 50000
+
+        topk_docs = []
+        total_tokens = 0
+        for i, doc in enumerate(doc_list):
+            if len(topk_docs) >= topk:
+                # Reached topk limit
+                break
+
+            # Encode this doc alone to count tokens
+            doc_str = json.dumps(doc)
+            doc_tokens = len(enc.encode(doc_str))
+
+            # Check if adding this doc exceeds token limit
+            if total_tokens + doc_tokens > max_tokens:
+                # Adding this doc would exceed token limit, stop adding more
+                break
+
+            # Add the doc
+            topk_docs.append(doc)
+            total_tokens += doc_tokens
+
+        log.info(f"Final topk_docs count: {len(topk_docs)}, total_tokens: {total_tokens}")
+
+        # Prepare usage message
+        count = len(topk_docs)
         message = json.dumps({
             "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
             "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
@@ -887,8 +897,11 @@ async def getVectorStoreDocs(request):
             "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
             "creditsUsed": count * 0.2
         })
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
-        return json.dumps(doc_list)
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
+
+        # Respond with the final topk_docs
+        return json.dumps(topk_docs), 200
+
     except Exception as e:
         log.error(str(e))
         raise Exception("There was an issue generating the answer. Please retry")
@@ -902,7 +915,7 @@ async def getWebExtract(request):
 
         if not request.is_json:
             raise Exception("invalid request")
-
+   
         data = request.get_json()
         log.info(data)
         headers = {}
