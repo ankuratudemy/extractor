@@ -167,6 +167,10 @@ def before_request():
     if request.endpoint in protected_endpoints and request.method != 'OPTIONS':
         api_key_header = request.headers.get('API-KEY')
         valid = security.api_key_required(api_key_header)
+        def generate():
+            yield 'No credits left to process request!'
+        if not valid and request.endpoint == 'anthropic':
+            return Response(stream_with_context(generate()), mimetype='text/event-stream') 
         if not valid:
             return Response(status=401)
         
@@ -1522,10 +1526,24 @@ def anthropic():
         question = f"{query}"
         context = SystemMessage(content=raw_context)
         message = HumanMessage(content=question)
-
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
+        "creditsUsed": 35
+        })
+        log.info(f"Averaged out credit usage for tokens: 25000")
+        log.info(f" Chargeable creadits: 35")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         def getAnswer():
             sync_response = anthropic_chat.stream([context, message])
             for chunk in sync_response:
+                log.info(chunk)
                 yield chunk.content
 
         return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')

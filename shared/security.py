@@ -24,7 +24,7 @@ def validate_api_key(api_key):
         try:
             redis_conn = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
             subscription_id = redis_conn.get(api_key)
-            credits_remaining = redis_conn.get(f"subscription_{subscription_id}_credits_remaining")
+            credits_remaining = redis_conn.get(f"subscription_{subscription_id}_remaining_credits")
             log.info(f"Credits Remaining {credits_remaining}")
             if not credits_remaining:
                 return False

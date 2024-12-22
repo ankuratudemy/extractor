@@ -1,0 +1,58 @@
+# Use the official Python image as the base image
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install system dependencies in a single RUN statement to reduce layers
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget \
+        ca-certificates \
+        openssl \
+        apt-transport-https && \
+    rm -rf /var/lib/apt/lists/*
+
+# (Optional) Install Java only if required by your application
+# If Java is not necessary, you can remove the following lines
+# RUN apt-get update && \
+#     apt-get install -y --no-install-recommends default-jre && \
+#     rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip to the latest version
+RUN pip install --upgrade pip
+
+# Copy and install Python dependencies
+COPY requirements-graph-indexer.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create a directory for uploads with appropriate permissions
+RUN mkdir -p /app/uploads && \
+    chmod 777 /app/uploads
+
+# (Optional) Add Debian Bookworm repository only if needed
+# If not required, it's better to remove these lines to keep the image slim
+# RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list && \
+#     echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+
+# Copy service account key securely
+# It's recommended to use Docker secrets or environment variables for sensitive data
+COPY ./SAKeys/fe-key.json /app/key.json
+RUN chmod 666 /app/key.json
+
+# Copy the application code to the container
+COPY graph-indexer-app.py app.py
+
+# Expose port 5000 for the Flask application
+EXPOSE 5000
+
+# Use a non-root user for better security
+RUN addgroup --system appgroup && adduser --system appuser --ingroup appgroup
+USER appuser
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/key.json
+# Run app.py when the container launches
+CMD ["gunicorn", "-w", "1", "--worker-connections", "1", "-b", "0.0.0.0:5000","--timeout", "0", "app:app"]

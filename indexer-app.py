@@ -1,3 +1,4 @@
+from shared.logging_config import log
 import os
 import io
 from flask import Flask, request
@@ -19,10 +20,9 @@ from typing import List, Tuple
 from pinecone import Pinecone
 
 sys.path.append('../')
-from shared.logging_config import log
 
 app = Flask(__name__)
-app.debug=True
+app.debug = True
 
 # Environment variables
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
@@ -38,6 +38,7 @@ index_name = os.environ.get('PINECONE_INDEX_NAME')
 pc = Pinecone(api_key=api_key)
 index = pc.Index(index_name)
 
+
 def get_event_loop():
     try:
         loop = asyncio.get_event_loop()
@@ -46,11 +47,13 @@ def get_event_loop():
         asyncio.set_event_loop(loop)
     return loop
 
+
 def generate_md5_hash(*args):
     serialized_args = [json.dumps(arg) for arg in args]
     combined_string = '|'.join(serialized_args)
     md5_hash = hashlib.md5(combined_string.encode('utf-8')).hexdigest()
     return md5_hash
+
 
 def download_file(bucket_name, filename, temp_file_path):
     storage_client = storage.Client()
@@ -58,8 +61,10 @@ def download_file(bucket_name, filename, temp_file_path):
     blob = bucket.blob(filename)
     os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
     blob.download_to_filename(temp_file_path)
-    log.info(f'Downloaded {filename} from bucket {bucket_name} to {temp_file_path}')
+    log.info(
+        f'Downloaded {filename} from bucket {bucket_name} to {temp_file_path}')
     return blob.content_type
+
 
 def convert_to_pdf(file_path, file_extension):
     import subprocess
@@ -89,6 +94,7 @@ def convert_to_pdf(file_path, file_extension):
         log.error(f'Error during PDF conversion: {str(e)}')
         return None
 
+
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
     model = TextEmbeddingModel.from_pretrained(embedder_name)
@@ -98,6 +104,7 @@ async def get_google_embedding(queries):
     log.info("Embeddings fetched successfully.")
     return embeddings
 
+
 async def async_put_request(session, url, payload, page_num, headers, max_retries=10):
     retries = 0
     while retries < max_retries:
@@ -105,27 +112,33 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
             payload_copy = io.BytesIO(payload.getvalue())
             async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=300)) as response:
                 if response.status == 429:
-                    log.warning(f"Retrying request for page {page_num}, Retry #{retries + 1}")
+                    log.warning(
+                        f"Retrying request for page {page_num}, Retry #{retries + 1}")
                     retries += 1
                     await asyncio.sleep(1)
                     continue
                 content = await response.read()
                 text_content = content.decode('utf-8', errors='ignore')
-                log.info(f"Page {page_num} processed successfully with length {len(text_content)} chars.")
+                log.info(
+                    f"Page {page_num} processed successfully with length {len(text_content)} chars.")
                 return text_content, page_num
 
         except (aiohttp.ClientError, ssl.SSLError, asyncio.TimeoutError) as e:
-            log.error(f"Error during request for page {page_num}: {str(e)}, retrying...")
+            log.error(
+                f"Error during request for page {page_num}: {str(e)}, retrying...")
             retries += 1
             await asyncio.sleep(1)
 
-    raise RuntimeError(f"Failed after {max_retries} retries for page {page_num}")
+    raise RuntimeError(
+        f"Failed after {max_retries} retries for page {page_num}")
+
 
 def upload_to_pinecone(vectors, namespace):
     log.info(f"Uploading {len(vectors)} vectors to Pinecone.")
     indexres = index.upsert(vectors=vectors, namespace=namespace)
     log.info(f"Upsert response: {indexres}")
     return indexres
+
 
 async def process_embedding_batch(batch, filename, namespace, file_id):
     texts = [item[0] for item in batch]
@@ -154,11 +167,13 @@ async def process_embedding_batch(batch, filename, namespace, file_id):
     del vectors, embeddings, texts, page_nums, chunk_indexes
     log.info("Batch processed and uploaded successfully.")
 
+
 def chunk_text(text, max_tokens=2048, overlap_chars=2000):
     enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)
     token_count = len(tokens)
-    log.info(f"Chunking text. Total tokens: {token_count}, max_tokens: {max_tokens}, overlap_chars: {overlap_chars}")
+    log.info(
+        f"Chunking text. Total tokens: {token_count}, max_tokens: {max_tokens}, overlap_chars: {overlap_chars}")
 
     if token_count <= max_tokens:
         log.info("No chunking needed, text fits in single chunk.")
@@ -173,17 +188,20 @@ def chunk_text(text, max_tokens=2048, overlap_chars=2000):
         chunk_text_str = enc.decode(chunk_tokens)
         chunk_len = len(chunk_tokens)
         chunks.append(chunk_text_str)
-        log.info(f"Created chunk with {chunk_len} tokens from {start} to {end}.")
+        log.info(
+            f"Created chunk with {chunk_len} tokens from {start} to {end}.")
 
         if end >= token_count:
             log.info("Reached end of tokens.")
             break
 
         # Overlap logic
-        overlap_str = chunk_text_str[-overlap_chars:] if len(chunk_text_str) > overlap_chars else chunk_text_str
+        overlap_str = chunk_text_str[-overlap_chars:] if len(
+            chunk_text_str) > overlap_chars else chunk_text_str
         overlap_tokens = enc.encode(overlap_str)
         overlap_count = len(overlap_tokens)
-        log.info(f"Overlap_count: {overlap_count} tokens for overlap_str length {len(overlap_str)} chars.")
+        log.info(
+            f"Overlap_count: {overlap_count} tokens for overlap_str length {len(overlap_str)} chars.")
 
         start = end - overlap_count
         end = start + max_tokens
@@ -201,8 +219,8 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
     """
     For each request (batch), we have these constraints:
     - Max 250 texts per batch
-    - Max 20,000 tokens total per batch # we restrict it to 14000
-    - Each text already chunked to <=2048 tokens by chunk_text
+    - Max 20,000 tokens total per batch (we restrict it to 14,000)
+    - Each text is already chunked to <=2048 tokens by chunk_text
     """
     batch = []
     batch_token_count = 0
@@ -213,25 +231,25 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
 
     log.info("Creating and uploading embeddings with new constraints.")
     for text_content, page_num in results:
-        # Add check for empty text
         if not text_content.strip():
             log.info(f"Skipping embedding for empty text in page {page_num}")
             continue
 
         content_len = len(text_content)
-        log.info(f"Processing text from page {page_num}, length {content_len} chars.")
-        # Chunk into <=2048 token chunks
-        text_chunks = chunk_text(text_content, max_tokens=2048, overlap_chars=2000)
+        log.info(
+            f"Processing text from page {page_num}, length {content_len} chars.")
+        text_chunks = chunk_text(
+            text_content, max_tokens=2048, overlap_chars=2000)
         log.info(f"{len(text_chunks)} chunks created for page {page_num}.")
 
         for i, chunk in enumerate(text_chunks):
             chunk_tokens = enc.encode(chunk)
             chunk_token_len = len(chunk_tokens)
-            log.info(f"Next chunk {i+1}/{len(text_chunks)} from page {page_num}. Chunk token length: {chunk_token_len}")
+            log.info(
+                f"Next chunk {i+1}/{len(text_chunks)} from page {page_num}. Chunk token length: {chunk_token_len}")
 
             # Check if adding this chunk would exceed batch limits
             if (batch_text_count + 1 > max_batch_texts) or (batch_token_count + chunk_token_len > max_batch_tokens):
-                # Before adding the chunk, we see it breaks limits. Process current batch first.
                 if batch:
                     log.info(f"Batch limits reached. Processing current batch. "
                              f"Batch size: {batch_text_count}, token count: {batch_token_count}.")
@@ -240,41 +258,41 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
                     batch_token_count = 0
                     batch_text_count = 0
                 else:
-                    # If batch is empty and still can't add this chunk (should not happen since chunk <=2048 tokens),
-                    # then we have a single chunk exceeding limits - theoretically not possible given chunk_text.
-                    log.warning("Single chunk exceeds allowed tokens or texts, but chunk_text guarantees <=2048 tokens. "
-                                "Check logic if this warning appears.")
+                    # This should not happen because chunk_text ensures <=2048 tokens
+                    log.warning(
+                        "Single chunk exceeds allowed tokens or texts. Check logic if this warning appears.")
 
-            # Now we can add the chunk to the batch safely
-            # (because if it was violating limits, we already processed and cleared the batch)
+            # Now we can add the chunk
             if (batch_text_count + 1 <= max_batch_texts) and (batch_token_count + chunk_token_len <= max_batch_tokens):
                 batch.append((chunk, page_num, i))
                 batch_token_count += chunk_token_len
                 batch_text_count += 1
-                log.info(f"Added chunk to batch. Current batch texts: {batch_text_count}, token count: {batch_token_count}")
+                log.info(
+                    f"Added chunk to batch. Current batch texts: {batch_text_count}, token count: {batch_token_count}")
             else:
-                # If we still can't add the chunk, then something is off. 
-                # This should not happen given the chunk size is always <= 2048 tokens and max_batch_tokens = 20000.
-                # But let's handle gracefully.
                 log.error("Unable to add chunk even after clearing batch. "
                           "Chunk might be too large or logic error occurred.")
-                return  # or raise an exception
+                return
 
     # Process any remaining items
     if batch:
-        log.info(f"Processing remaining batch of size {batch_text_count}, token count {batch_token_count}.")
+        log.info(
+            f"Processing remaining batch of size {batch_text_count}, token count {batch_token_count}.")
         await process_embedding_batch(batch, filename, namespace, file_id)
+
 
 async def process_pages_async(pages, headers, filename, namespace, file_id):
     url = SERVER_URL
     log.info(f"Starting async processing of {len(pages)} pages.")
     async with aiohttp.ClientSession() as session:
-        tasks = [async_put_request(session, url, page_data, page_num, headers) for page_num, page_data in pages]
+        tasks = [async_put_request(
+            session, url, page_data, page_num, headers) for page_num, page_data in pages]
         results = await asyncio.gather(*tasks)
 
     log.info("All pages processed. Now creating and uploading embeddings.")
     await create_and_upload_embeddings_in_batches(results, filename, namespace, file_id)
     return results
+
 
 @app.route('/', methods=['POST'])
 def event_handler():
@@ -293,22 +311,44 @@ def event_handler():
         folder_name, file_name_only = os.path.split(file_name)
         filename = file_name_only
         temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        content_type_header = download_file(bucket_name, file_name, temp_file_path)
 
+        # ---------------------
+        #  Extract folder_name parts
+        # ---------------------
         log.info(f'Folder: {folder_name}, File: {file_name_only}')
-
         folder_name_parts = folder_name.split('/')
-        if len(folder_name_parts) >= 3:
-            subscription_id = folder_name_parts[0]
-            project_id = folder_name_parts[1]
-            user_id = folder_name_parts[2]
-        else:
+        if len(folder_name_parts) < 3:
             log.error('Invalid folder path format')
             return 'Invalid folder path format', 400
 
-        log.info(f"Subscription ID: {subscription_id}, Project ID: {project_id}, User ID: {user_id}")
+        subscription_id = folder_name_parts[0]
+        project_id = folder_name_parts[1]
+        user_id = folder_name_parts[2]
+        log.info(
+            f"Subscription ID: {subscription_id}, Project ID: {project_id}, User ID: {user_id}")
+
+        # ---------------------
+        #  Check remaining credits first!
+        # ---------------------
+        remaining_credits = psql.get_remaining_credits(subscription_id)
+        log.info(
+            f"Remaining credits for subscription {subscription_id}: {remaining_credits}")
+
+        # If no remaining credits, short-circuit and update status
         file_id = generate_md5_hash(subscription_id, project_id, filename)
+        if remaining_credits <= 0:
+            log.error(
+                f"No credits left for subscription {subscription_id}. File {filename} not processed.")
+            psql.update_file_status(
+                id=file_id, status="no credits", page_nums=0, updatedAt=datetime.now())
+            return 'No credits left for subscription, skipping file processing', 402
+
+        # We do have credits, proceed...
+        content_type_header = download_file(
+            bucket_name, file_name, temp_file_path)
         log.info(f"Generated file_id: {file_id}")
+        psql.update_file_status(
+            id=file_id, status="processing", page_nums=0, updatedAt=datetime.now())
 
         default_ocr_strategy = 'auto'
         default_out_format = 'text/plain'
@@ -324,8 +364,7 @@ def event_handler():
             headers['X-Tika-OCRLanguage'] = x_tika_ocr_language
 
         log.info(f"Content-Type: {content_type_header}")
-        contentType="application/pdf"
-        psql.update_file_status(id=file_id, status="processing", page_nums=0, updatedAt=datetime.now())
+        contentType = "application/pdf"
 
         oFileExtMap = {
             "application/octet-stream": "use_extension",
@@ -393,7 +432,8 @@ def event_handler():
         if file_extension == 'use_extension':
             file_extension = os.path.splitext(filename)[1][1:].lower()
 
-        log.info(f"Determined file extension: {file_extension} for file {filename}")
+        log.info(
+            f"Determined file extension: {file_extension} for file {filename}")
 
         pages = []
         num_pages = 0
@@ -428,7 +468,7 @@ def event_handler():
             contentType = reverse_file_ext_map.get(file_extension, '')
             del image_data
 
-        elif file_extension in ['ods']:
+        elif file_extension == 'ods':
             with open(temp_file_path, 'rb') as f:
                 ods_data = f.read()
             pages = file_processor.split_ods(ods_data)
@@ -436,9 +476,13 @@ def event_handler():
             contentType = reverse_file_ext_map.get(file_extension, '')
             del ods_data
 
-        elif file_extension in ['docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg', '123', 'dbf', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',  'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm', 'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf']:
+        elif file_extension in [
+            'docx', 'pdf', 'odt', 'odp', 'odg', 'odf', 'fodt', 'fodp', 'fodg',
+            '123', 'dbf', 'scm', 'dotx', 'docm', 'dotm', 'xml', 'doc',
+            'qpw', 'pptx', 'ppsx', 'ppmx', 'potx', 'pptm', 'ppam', 'ppsm',
+            'pptm', 'ppam', 'ppt', 'pps', 'ppt', 'ppa', 'rtf'
+        ]:
             pdf_data = convert_to_pdf(temp_file_path, file_extension)
-
             if pdf_data:
                 pages, num_pages = file_processor.split_pdf(pdf_data)
             else:
@@ -452,20 +496,25 @@ def event_handler():
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-        bearer_token = google_auth.impersonated_id_token(serverurl=os.environ.get('SERVER_URL')).json()['token']
+        bearer_token = google_auth.impersonated_id_token(
+            serverurl=os.environ.get('SERVER_URL')).json()['token']
         log.info(f"bearer_token: {bearer_token}")
         headers['Content-Type'] = contentType
         headers['Authorization'] = f'Bearer {bearer_token}'
 
         loop = get_event_loop()
-        results = loop.run_until_complete(process_pages_async(pages, headers, filename, namespace=project_id, file_id=file_id))
+        results = loop.run_until_complete(process_pages_async(
+            pages, headers, filename,
+            namespace=project_id,
+            file_id=file_id
+        ))
 
         json_output = []
-        processed_pages = 0  # To track non-empty pages
-
+        processed_pages = 0
         for result, page_num in results:
             if not result.strip():
-                log.info(f"Skipping empty text in page {page_num} for JSON output.")
+                log.info(
+                    f"Skipping empty text in page {page_num} for JSON output.")
                 continue
             page_obj = {
                 'page': page_num,
@@ -477,25 +526,34 @@ def event_handler():
         json_string = json.dumps(json_output, indent=4)
         log.info(f"Extraction successful for file: {filename}")
 
+        # Suppose each processed page costs 1.5 credits
         message = json.dumps({
             "subscription_id": subscription_id,
             "user_id": user_id,
             "project_id": project_id,
-            "creditsUsed": processed_pages  # Use processed_pages instead of num_pages
+            "creditsUsed": processed_pages * 1.5
         })
         log.info(f"Number of pages processed: {processed_pages}")
         log.info(f"Message to topic: {message}")
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
+        google_pub_sub.publish_messages_with_retry_settings(
+            GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message
+        )
 
-        psql.update_file_status(id=file_id, status="processed", page_nums=processed_pages, updatedAt=datetime.now())
+        psql.update_file_status(
+            id=file_id, status="processed",
+            page_nums=processed_pages,
+            updatedAt=datetime.now()
+        )
         return json_string, 200, {'Content-Type': 'application/json; charset=utf-8'}
 
     else:
         return 'Missing bucket or file name in event data', 400
 
+
 def shutdown_handler(signal_int: int, frame) -> None:
     log.info(f"Caught Signal {signal.strsignal(signal_int)}")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown_handler)
