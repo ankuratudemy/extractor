@@ -34,7 +34,7 @@ callbacks = [FinalStreamingStdOutCallbackHandler()]
 from vertexai.preview.language_models import TextEmbeddingModel
 from urllib.parse import urlencode
 import json
-from shared import file_processor, google_auth, security, google_pub_sub
+from shared import file_processor, google_auth, security, google_pub_sub, search_helper
 from types import FrameType
 import json
 import time
@@ -43,6 +43,7 @@ import aiohttp
 import asyncio
 import ssl
 import signal
+import tiktoken
 
 sys.path.append('../')
 from shared.logging_config import log
@@ -156,17 +157,20 @@ vertexchat = ChatVertexAI(model="gemini-1.5-pro", safety_settings={
 vertexchat_stream = ChatVertexAI(model="gemini-1.5-pro", response_mime_type="application/json", safety_settings={
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
     })
-def verify_api_key():
-    api_key_header = request.headers.get('API-KEY')
-    res = security.api_key_required(api_key_header)
-    return res
-
-
 @app.before_request
 def before_request():
-    log.info(f"request.endpoint {request.endpoint}")
-    if (request.endpoint == 'extract' or request.endpoint == 'search' or request.endpoint == 'chat' or request.endpoint == 'groqchat' or request.endpoint == 'geminichat' or request.endpoint == 'anthropic' or request.endpoint == 'serp' or request.endpoint == 'webextract' or request.endpoint =='qna' or request.endpoint =='chatmr') and request.method != 'OPTIONS':  # Check if the request is for the /extract route
-        valid = verify_api_key()
+    log.info(f"Request endpoint: {request.endpoint}")
+    protected_endpoints = [
+        'extract', 'search', 'chat', 'groqchat', 'geminichat',
+        'anthropic', 'serp', 'webextract', 'qna', 'chatmr'
+    ]
+    if request.endpoint in protected_endpoints and request.method != 'OPTIONS':
+        api_key_header = request.headers.get('API-KEY')
+        valid = security.api_key_required(api_key_header)
+        def generate():
+            yield 'No credits left to process request!'
+        if not valid and request.endpoint == 'anthropic':
+            return Response(stream_with_context(generate()), mimetype='text/event-stream') 
         if not valid:
             return Response(status=401)
         
@@ -175,7 +179,7 @@ def default_error_responder(request_limit: RequestLimit):
     return Response(status=429)
 
 limiter = Limiter(
-        key_func=lambda: getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        key_func=lambda: getattr(request, 'tenant_data', {}).get('subscription_id', None),
         app=app,
         storage_uri=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/xtract",
         storage_options={"socket_connect_timeout": 30},
@@ -357,7 +361,10 @@ def extract():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": chargeable_credits
         })
         log.info(f"Number of pages processed: {num_pages}")
@@ -459,7 +466,10 @@ async def async_put_request(session, url, payload, page_num, headers, max_retrie
 def search():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        projectId = getattr(request, 'tenant_data', {}).get('project_id', None)
+        namespace = projectId
         log.info(f"user_id {userId}")
+        log.info(f"project id to search(namespace) {projectId}")
         if not userId:
             return 'invalid request', 400
     
@@ -501,7 +511,7 @@ def search():
     try:
         # Search Vector DB
         docs = index.query(
-            namespace=str(userId),
+            namespace=str(namespace),
             vector=embeddings[0],
             top_k=topk,
             include_values=False,
@@ -521,7 +531,10 @@ def search():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.1
         })
         log.info(f"Number of pages processed: {count}")
@@ -580,6 +593,7 @@ async def async_get_request(session, url, params, headers=None, max_retries=10):
     raise RuntimeError(f"Failed after {max_retries} retries for websearch")
 
 @app.route('/serp', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def serp():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
@@ -632,7 +646,10 @@ def serp():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.2
         })
         log.info(f"Number of pages processed: {count}")
@@ -645,6 +662,7 @@ def serp():
         return 'Websearch call: Something went wrong', 500
 
 @app.route('/webextract', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def webextract():
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
@@ -730,7 +748,10 @@ def webextract():
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
@@ -746,14 +767,17 @@ def webextract():
 async def getVectorStoreDocs(request):
     try:
         userId = getattr(request, 'tenant_data', {}).get('user_id', None)
+        projectId = getattr(request, 'tenant_data', {}).get('project_id', None)
+        namespace = projectId
         log.info(f"user_id {userId}")
+        log.info(f"project id to search(namespace) {projectId}")
+
         if not userId:
             raise Exception("invalid request")
-    
-        # Check if request body contains the required parameters
+
         if not request.is_json:
             raise Exception("invalid request")
-        
+
         data = request.get_json()
         log.info(data)
         if 'topk' not in data or 'q' not in data:
@@ -763,61 +787,128 @@ async def getVectorStoreDocs(request):
             if 'q' not in data:
                 missing_params.append('q')
             return f"Missing required parameters: {', '.join(missing_params)}", 400
-        
+
         topk = data['topk']
         query = data['q']
+        history = data.get('history', [])
         log.info(f"query: {query} topk: {topk}")
+
     except Exception as e:
         log.info(str(e))
-        raise Exception(str(e))
-    
+        raise Exception("There was an issue generating the answer. Please retry")
+
+    # Setup Pinecone Index
     try:
         pc = PC(api_key=PINECONE_API_KEY)
         index = pc.Index(name=PINECONE_INDEX_NAME)
     except Exception as e:
         log.info(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
+    # Generate multiple queries
     try:
-        embeddings = await get_google_embedding(queries=[query])
+        multi_query_prompt = search_helper.create_multi_query_prompt(history, query)
+        multi_query_resp = anthropic_chat.invoke(input=multi_query_prompt).content
+        all_queries = [q.strip() for q in multi_query_resp.split('\n') if q.strip()]
+        log.info(f"Generated Queries: {all_queries}")
+
+        keyword_query = all_queries[-1]
+        try:
+            keywords = json.loads(keyword_query)
+            if not isinstance(keywords, list):
+                keywords = [keyword_query]
+        except:
+            keywords = [keyword_query]
+
+        search_queries = all_queries[:-1] + keywords
+
     except Exception as e:
         log.error(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
+    # Get embeddings for all queries
     try:
-        # Search Vector DB
-        docs = index.query(
-            namespace=str(userId),
-            vector=embeddings[0],
-            top_k=topk,
-            include_values=False,
-            include_metadata=True,
-            # filter={
-            #     "genre": {"$in": ["comedy", "documentary", "drama"]}
-            # }
-        )
-        log.info(f"Docs: {docs.to_dict()}")
-        doc_list = [{'source': match['metadata']['source'], 'page': match['metadata']['page'], 'text': match['metadata']['text']} for match in docs.to_dict()['matches']]
-        count = len(doc_list)
-        final_response = {
-            'count': count,
-            'data': doc_list
-        }
-        json_string = json.dumps(final_response, indent=4)
-        #Build message for topic
-        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        embeddings_list = await get_google_embedding(queries=search_queries)
+    except Exception as e:
+        log.error(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
+
+    # Perform Pinecone searches for each query
+    all_matches = []
+    try:
+        for sq, emb in zip(search_queries, embeddings_list):
+            docs = index.query(
+                namespace=str(namespace),
+                vector=emb,
+                top_k=topk,
+                include_values=False,
+                include_metadata=True
+            ).to_dict().get('matches', [])
+            all_matches.extend(docs)
+
+        # Deduplicate based on doc id
+        unique_docs = {}
+        for doc in all_matches:
+            doc_id = doc['id']
+            if doc_id not in unique_docs:
+                unique_docs[doc_id] = doc
+
+        final_docs = list(unique_docs.values())
+        # Convert final_docs to required format
+        doc_list = []
+        for match in final_docs:
+            doc_list.append({
+                'source': match['metadata']['source'],
+                'page': match['metadata']['page'],
+                'text': match['metadata']['text']
+            })
+
+        # Reorder docs based on regex keyword matches
+        doc_list = await search_helper.reorder_docs(doc_list, keywords)
+
+        # Now pick up to topk docs without exceeding 50k tokens
+        enc = tiktoken.get_encoding("cl100k_base")
+        max_tokens = 50000
+
+        topk_docs = []
+        total_tokens = 0
+        for i, doc in enumerate(doc_list):
+            if len(topk_docs) >= topk:
+                # Reached topk limit
+                break
+
+            # Encode this doc alone to count tokens
+            doc_str = json.dumps(doc)
+            doc_tokens = len(enc.encode(doc_str))
+
+            # Check if adding this doc exceeds token limit
+            if total_tokens + doc_tokens > max_tokens:
+                # Adding this doc would exceed token limit, stop adding more
+                break
+
+            # Add the doc
+            topk_docs.append(doc)
+            total_tokens += doc_tokens
+
+        log.info(f"Final topk_docs count: {len(topk_docs)}, total_tokens: {total_tokens}")
+
+        # Prepare usage message
+        count = len(topk_docs)
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
-        "creditsUsed": count * 0.2
+            "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+            "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+            "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+            "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
+            "creditsUsed": count * 0.2
         })
-        log.info(f"Number of pages processed: {count}")
-        log.info(f"Message to topic: {message}")
-        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
-        return json.dumps(doc_list)
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
+
+        # Respond with the final topk_docs
+        return json.dumps(topk_docs), 200
+
     except Exception as e:
         log.error(str(e))
-        raise Exception(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
 
 async def getWebExtract(request):
     try:
@@ -828,7 +919,7 @@ async def getWebExtract(request):
 
         if not request.is_json:
             raise Exception("invalid request")
-
+   
         data = request.get_json()
         log.info(data)
         headers = {}
@@ -923,7 +1014,10 @@ async def getWebExtract(request):
         # Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-            "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+            "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+            "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+            "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+            "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
             "creditsUsed": count * 0.3
         })
         log.info(f"Number of pages processed: {count}")
@@ -1132,7 +1226,10 @@ async def getWebExtractLCFormat(request):
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
         message = json.dumps({
-        "username": getattr(request, 'tenant_data', {}).get('tenant_id', None),
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
         "creditsUsed": count
         })
         log.info(f"Number of pages processed: {count}")
@@ -1189,10 +1286,11 @@ def chat_gpt_helper(client, prompt):
         yield str(e)
     
 @app.route('/chat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def chat():
     try:
         loop = asyncio.new_event_loop()
-        docData = loop.run_until_complete(getVectorStoreDocs(request))
+        docData = loop.run_until_complete(search_helper.getVectorStoreDocs(request))
         webData = loop.run_until_complete(getWebExtract(request))
         
         # Prepare the prompt
@@ -1211,6 +1309,7 @@ def chat():
         return str(e)
     
 @app.route('/qna', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def qna():
     try:
         
@@ -1310,6 +1409,7 @@ def split_data(data, chunk_size):
 
 
 @app.route('/groqchat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def groqchat():
     try:
         docData = asyncio.run(getVectorStoreDocs(request))
@@ -1346,6 +1446,7 @@ def groqchat():
         return str(e)
 
 @app.route('/geminichat', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def geminichat():
     try:
         data = request.get_json()
@@ -1390,11 +1491,13 @@ def geminichat():
 
 
 @app.route('/anthropic', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def anthropic():
     try:
         data = request.get_json()
         query = data.get('q')
         sources = data.get('sources', [])
+        history = data.get('history', [])
 
         docData = []
         webData = []
@@ -1403,13 +1506,13 @@ def anthropic():
             docData = asyncio.run(getVectorStoreDocs(request))
         if 'web' in sources:
             webData = asyncio.run(getWebExtract(request))
-        # prepare input data for the model
+
         raw_context = (
             f"""
                     You are a helpful assistant.
                     Always respond to the user's question with a JSON object containing three keys:
                     - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1.
-                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include the `text` field (the chunk of context), a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include  a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
                     - `followup_question`: This key should contain a follow-up question relevant to the user's query.
 
                     Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
@@ -1419,23 +1522,37 @@ def anthropic():
                     Respond in JSON format. Do not add ```json at the beginning or ``` at the end. Do not duplicate sources in the `sources` array.
                     """
         )
-        question = (
-            f"{query}"
-        )
+
+        question = f"{query}"
         context = SystemMessage(content=raw_context)
         message = HumanMessage(content=question)
-
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        message = json.dumps({
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
+        "creditsUsed": 35
+        })
+        log.info(f"Averaged out credit usage for tokens: 25000")
+        log.info(f" Chargeable creadits: 35")
+        log.info(f"Message to topic: {message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
         def getAnswer():
             sync_response = anthropic_chat.stream([context, message])
             for chunk in sync_response:
+                log.info(chunk)
                 yield chunk.content
 
         return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
     except Exception as e:
         log.error(str(e))
-        return str(e)
+        raise Exception("There was an issue generating the answer. Please retry")
 
 @app.route('/chatmr', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
 def chatmr():
     try:
         data = request.get_json()
