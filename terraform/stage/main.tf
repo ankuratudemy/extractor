@@ -1,8 +1,9 @@
-provider "google" {
+provider "google-beta" {
   # credentials = file("/dev/null")
   project = "structhub-412620"
   region  = "us-central1"
 }
+
 
 variable "environment" {
   description = "Environment: 'stage'"
@@ -265,6 +266,14 @@ resource "google_project_service" "storage_api" {
   disable_on_destroy         = false
 }
 
+resource "google_project_service" "firebase_api" {
+  project = local.project_id
+  service                    = "firebase.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+
 # resource "google_compute_address" "external_ip_fe" {
 #   name = local.external_ip_address_name_fe
 # }
@@ -272,6 +281,18 @@ resource "google_project_service" "storage_api" {
 # resource "google_compute_address" "external_ip_be" {
 #   name = local.external_ip_address_name_be
 # }
+
+resource "google_firestore_database" "firestore" {
+  name = "structhub-${local.environment}"
+  location_id = "us-central1" 
+  type = "FIRESTORE_NATIVE"
+  project = local.project_id
+  # Ensure the Firebase API is enabled before creating the Firebase project
+  depends_on = [
+    google_project_service.firebase_api
+  ]
+}
+
 
 resource "google_compute_global_address" "external_ip_fe" {
   name = "${local.external_ip_address_name_fe}${local.fe_domain_suffix}"
