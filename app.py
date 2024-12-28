@@ -1528,7 +1528,7 @@ def anthropic():
         message = HumanMessage(content=question)
         #Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
-        message = json.dumps({
+        pubsub_message = json.dumps({
         "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
         "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
@@ -1537,9 +1537,9 @@ def anthropic():
         })
         log.info(f"Averaged out credit usage for tokens: 25000")
         log.info(f" Chargeable creadits: 35")
-        log.info(f"Message to topic: {message}")
+        log.info(f"Message to topic: {pubsub_message}")
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=message)
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=pubsub_message)
         def getAnswer():
             sync_response = anthropic_chat.stream([context, message])
             for chunk in sync_response:
