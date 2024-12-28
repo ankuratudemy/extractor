@@ -1,4 +1,4 @@
-provider "google-beta" {
+provider "google" {
   # credentials = file("/dev/null")
   project = "structhub-412620"
   region  = "us-central1"

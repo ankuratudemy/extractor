@@ -6,9 +6,9 @@ provider "google" {
 
 
 variable "environment" {
-  description = "Environment: 'prod'"
+  description = "Environment: 'stage'"
   type        = string
-  default     = "prod"
+  default     = "stage"
 }
 
 locals {

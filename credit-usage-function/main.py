@@ -70,7 +70,6 @@ def pubsub_to_postgresql(event, context):
             with connection.cursor() as cursor:
                 # Start the transaction
                 connection.autocommit = False
-
                 try:
                     # Acquire an advisory lock to serialize access to the credit update
                     lock_id = int(time.time() * 1000)  # milliseconds since the epoch
