@@ -1,8 +1,9 @@
-provider "google" {
+provider "google-beta" {
   # credentials = file("/dev/null")
   project = "structhub-412620"
   region  = "us-central1"
 }
+
 
 variable "environment" {
   description = "Environment: 'prod'"
@@ -28,8 +29,8 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-213.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:22.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-245.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
@@ -265,6 +266,14 @@ resource "google_project_service" "storage_api" {
   disable_on_destroy         = false
 }
 
+resource "google_project_service" "firebase_api" {
+  project = local.project_id
+  service                    = "firebase.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+
 # resource "google_compute_address" "external_ip_fe" {
 #   name = local.external_ip_address_name_fe
 # }
@@ -272,6 +281,18 @@ resource "google_project_service" "storage_api" {
 # resource "google_compute_address" "external_ip_be" {
 #   name = local.external_ip_address_name_be
 # }
+
+resource "google_firestore_database" "firestore" {
+  name = "structhub-${local.environment}"
+  location_id = "us-central1" 
+  type = "FIRESTORE_NATIVE"
+  project = local.project_id
+  # Ensure the Firebase API is enabled before creating the Firebase project
+  depends_on = [
+    google_project_service.firebase_api
+  ]
+}
+
 
 resource "google_compute_global_address" "external_ip_fe" {
   name = "${local.external_ip_address_name_fe}${local.fe_domain_suffix}"
