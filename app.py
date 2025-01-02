@@ -543,7 +543,7 @@ def search():
         "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
         "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
         "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
-        "creditsUsed": count * 0.1
+        "creditsUsed": 0.2
         })
         log.info(f"Number of pages processed: {count}")
         log.info(f"Message to topic: {message}")
