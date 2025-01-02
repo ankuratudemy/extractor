@@ -35,4 +35,7 @@ bs4
 langchain-google-vertexai
 anthropic[vertex]
 tiktoken
+google-genai
+typing-extensions
+pydantic
 
