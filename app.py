@@ -1,7 +1,11 @@
 import os
 import io
 import re
+from typing import List
+from pydantic import BaseModel
 from openai import OpenAI
+from google import genai
+from google.genai import types
 from flask import Flask, request, make_response, render_template, jsonify, abort, make_response, Response, stream_with_context
 from flask_cors import CORS
 from flask_limiter import Limiter, RequestLimit
@@ -157,19 +161,23 @@ vertexchat = ChatVertexAI(model="gemini-1.5-pro", safety_settings={
 vertexchat_stream = ChatVertexAI(model="gemini-1.5-pro", response_mime_type="application/json", safety_settings={
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
     })
+
+google_genai_client = genai.Client(
+    vertexai=True, project=GCP_PROJECT_ID, location='us-central1'
+)
 @app.before_request
 def before_request():
     log.info(f"Request endpoint: {request.endpoint}")
     protected_endpoints = [
         'extract', 'search', 'chat', 'groqchat', 'geminichat',
-        'anthropic', 'serp', 'webextract', 'qna', 'chatmr'
+        'anthropic', 'serp', 'webextract', 'qna', 'chatmr', 'askme'
     ]
     if request.endpoint in protected_endpoints and request.method != 'OPTIONS':
         api_key_header = request.headers.get('API-KEY')
         valid = security.api_key_required(api_key_header)
         def generate():
             yield 'No credits left to process request!'
-        if not valid and request.endpoint == 'anthropic':
+        if not valid and (request.endpoint == 'anthropic' or request.endpoint == 'askme') :
             return Response(stream_with_context(generate()), mimetype='text/event-stream') 
         if not valid:
             return Response(status=401)
@@ -808,7 +816,15 @@ async def getVectorStoreDocs(request):
     # Generate multiple queries
     try:
         multi_query_prompt = search_helper.create_multi_query_prompt(history, query)
-        multi_query_resp = anthropic_chat.invoke(input=multi_query_prompt).content
+        # multi_query_resp = anthropic_chat.invoke(input=multi_query_prompt).content
+        sync_response = google_genai_client.models.generate_content(
+                                 model='gemini-2.0-flash-exp',
+                                 contents=multi_query_prompt,
+                                 config= {
+                                 'temperature': 0.5
+                                 }
+                            )
+        multi_query_resp = sync_response.text
         all_queries = [q.strip() for q in multi_query_resp.split('\n') if q.strip()]
         log.info(f"Generated Queries: {all_queries}")
 
@@ -1550,6 +1566,111 @@ def anthropic():
     except Exception as e:
         log.error(str(e))
         raise Exception("There was an issue generating the answer. Please retry")
+
+@app.route('/askme', methods=['POST'])
+@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
+def askme():
+    try:
+        data = request.get_json()
+        query = data.get('q')
+        sources = data.get('sources', [])
+        history = data.get('history', [])
+
+        docData = []
+        webData = []
+
+        if 'vstore' in sources:
+            docData = asyncio.run(getVectorStoreDocs(request))
+        if 'web' in sources:
+            webData = asyncio.run(getWebExtract(request))
+
+        raw_context = (
+            f"""
+                    You are a helpful assistant.
+                    Always respond to the user's question with a JSON object containing three keys:
+                    - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1. Make sure this section is in markdown format.
+                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include  a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                    - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+
+                    Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
+                    DO NOT use your existing information and only use the information provided below to generate fial answer.
+                    Use this data from web search {webData} and from the private knowledge store {docData}, which always have source information including file page, page number, and URL.
+
+                    Respond in JSON format. Do not add ```json at the beginning or ``` at the end of response. The output needs to only have JSON data, nothing else. THIS IS VERY IMPORTANT. Do not duplicate sources in the `sources` array.
+                    """
+        )
+
+        question = f"{query}"
+        #Build message for topic
+        log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
+        pubsub_message = json.dumps({
+        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
+        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
+        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
+        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
+        "creditsUsed": 35
+        })
+        log.info(f"Averaged out credit usage for tokens: 25000")
+        log.info(f" Chargeable creadits: 35")
+        log.info(f"Message to topic: {pubsub_message}")
+        # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
+        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=pubsub_message)
+        def getAnswer():
+
+            # class Source(BaseModel):
+            #     citation: int
+            #     page: float
+            #     source: str
+
+            # class EOLResponse(BaseModel):
+            #     response: str
+            #     sources: List[Source]
+            #     followup_question: str
+
+            # Generate the JSON schema from the Pydantic model
+            # response_schema = {
+            #     "required": [
+            #         "response",
+            #         "sources",
+            #         "followup_question",
+            #     ],
+            #     "properties": {
+            #         "response": {"type": "string"},
+            #         "sources": {
+            #             "type": "array",
+            #             "items": {
+            #                 "type": "object",
+            #                 "properties": {
+            #                     "citation": {"type": "integer"},
+            #                     "page": {"type": "number"},
+            #                     "source": {"type": "string"},
+            #                 },
+            #                 "required": ["citation", "page", "source"]
+            #             }
+            #         },
+            #         "followup_question": {"type": "string"},
+            #     },
+            #     "type": "object",
+            # }
+
+
+            sync_response = google_genai_client.models.generate_content_stream(
+                                 model='gemini-2.0-flash-exp',
+                                 contents=question,
+                                 config= {
+                                 'system_instruction': raw_context,
+                                 'temperature': 0.3
+                                 }
+                            )
+            for chunk in sync_response:
+                log.info(chunk)
+                yield chunk.text
+
+        return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
+    except Exception as e:
+        log.error(str(e))
+        raise Exception("There was an issue generating the answer. Please retry")
+
 
 @app.route('/chatmr', methods=['POST'])
 @limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
