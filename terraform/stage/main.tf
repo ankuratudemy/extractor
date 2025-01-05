@@ -25,6 +25,9 @@ locals {
   indexer_memory                       = "2Gi"
   indexer_port                         = 5000
   searxng_port                         = 8080
+  confluence_cpu                       = 1
+  confluence_memory                    = "2Gi"
+  confluence_port                      = 5000
   external_ip_address_name_fe          = "xtract-fe-ip-name"
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
@@ -32,6 +35,7 @@ locals {
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-261.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-7.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -1127,4 +1131,213 @@ resource "google_compute_region_network_endpoint_group" "websearch_backend" {
   cloud_run {
     service = google_cloud_run_v2_service.websearch_cloud_run[local.regions[count.index]].name
   }
+}
+
+
+## Confluence
+
+# Create a Pub/Sub topic for Confluence
+resource "google_pubsub_topic" "confluence_topic" {
+  name = "confluence-topic-${local.environment}"
+}
+
+resource "google_cloud_run_v2_service" "confluence_cloud_run" {
+  for_each = toset(local.us_regions) # or local.regions if you prefer
+
+  name     = "confluence-indexer${local.indexer_domain_suffix}-${each.key}"
+  location = each.key
+  template {
+    service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+    scaling {
+      max_instance_count = 1000  # or local.region_instance_counts[each.key].indexer_max_inst
+      min_instance_count = 0
+    }
+
+    containers {
+      ports {
+        container_port = local.confluence_port
+      }
+      image = local.confluence_image
+
+      # Example environment variables (adjust as needed)
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+      }
+      env {
+        name  = "GCP_CREDIT_USAGE_TOPIC"
+        value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+      }
+      env {
+        name  = "ENVIRONMENT"
+        value = local.environment
+      }
+      env {
+        name = "PSQL_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+       env {
+        name = "REDIS_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "REDIS_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "PSQL_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_USERNAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_DATABASE"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "REDIS_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "PINECONE_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "PINECONE_INDEX_NAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+            version = "latest"
+          }
+        }
+      }
+
+      resources {
+        limits = {
+          cpu    = local.confluence_cpu
+          memory = local.confluence_memory
+        }
+      }
+    }
+    max_instance_request_concurrency = 1
+    timeout                          = "60s"
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  # Let’s assume you want only internal or private traffic:
+  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY" 
+  # or "INGRESS_TRAFFIC_ALL" if you want external access.
+  
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+resource "google_eventarc_trigger" "confluence_trigger" {
+  for_each = toset(local.us_regions)
+
+  name     = "confluence-trigger-${each.key}-${local.environment}"
+  location = each.key  # or you can set `= each.key` if you want region-based triggers
+
+  matching_criteria {
+    attribute = "type"
+    value     = "google.cloud.pubsub.topic.v1.messagePublished"
+  }
+
+  # The transport block for Pub/Sub triggers
+  transport {
+    pubsub {
+      topic = google_pubsub_topic.confluence_topic.id
+    }
+  }
+
+  service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+  destination {
+    cloud_run_service {
+      service = google_cloud_run_v2_service.confluence_cloud_run[each.key].name
+      region  = each.key
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.confluence_topic,
+    google_cloud_run_v2_service.confluence_cloud_run,
+  ]
 }
