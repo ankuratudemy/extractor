@@ -354,12 +354,14 @@ def process_confluence_requests(
             # Prepare vector
             vector_id = f"{file_id}#{project_id}"
             vector_metadata = {
-                "content": page_content,
+                "text": page_content,
                 "sourceType": "Confluence",
                 "dataSourceId": data_source_id,
                 "pageId": page_id,
                 "title": doc.metadata.get("title", ""),
                 "lastModified": str(doc.metadata.get("when", now_dt)),
+                "source": doc.metadata.get("source", "ConfluencePage"),
+                "page": 1
             }
             pinecone_vectors.append((vector_id, embedding, vector_metadata))
             local_counter += 1

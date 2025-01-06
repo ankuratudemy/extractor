@@ -35,7 +35,7 @@ locals {
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-261.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-12.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-15.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
