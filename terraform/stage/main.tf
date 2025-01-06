@@ -35,7 +35,7 @@ locals {
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-261.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-7.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-8.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -1509,13 +1509,13 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
   build_config {
     runtime     = "python310"
     entry_point = "pubsub_to_cloud_run_confluence_job"
-
     source {
       storage_source {
         bucket = google_storage_bucket.confluence_topic_function_bucket.name
         object = "confluence-topic-function${local.fe_domain_suffix}-${data.archive_file.confluence_topic_function_source.output_md5}.zip"
       }
     }
+    service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
   }
 
   service_config {
@@ -1526,6 +1526,7 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
     environment_variables = {
       CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.confluence_cloud_run_job["us-central1"].name
       CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID = local.project_id
     }
     secret_environment_variables {
       project_id = local.project_id

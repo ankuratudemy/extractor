@@ -433,5 +433,5 @@ def get_data_source_details(data_source_id):
                 return data_source_details
 
     except Exception as e:
-        print(f"Error connecting to PostgreSQL or fetching files by data_source_id: {str(e)}")
+        print(f"Error connecting to PostgreSQLdetails of data_source_id: {str(e)}")
         sys.exit("Function execution failed.")

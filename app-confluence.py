@@ -445,16 +445,18 @@ def event_handler():
     """
     data = request.get_json()
     log.info(f"Event Data: {data}")
-
+    DATA_SOURCE_CONFIG = os.environ.get("DATA_SOURCE_CONFIG")
+    event_data = json.loads(json.loads(DATA_SOURCE_CONFIG).get("event_data"))
+    log.info(f"Cloud Run Job received data: {event_data}") 
     # Extract parameters from the message
-    confluence_url = data.get("confluenceUrl")
-    confluence_user = data.get("confluenceUser")
-    confluence_token = data.get("confluenceToken")
-    parent_page_id = data.get("confluenceParent")
-    last_sync_time = data.get("lastSyncTime")
-    project_id = data.get("projectId")
+    confluence_url = event_data.get("confluenceUrl")
+    confluence_user = event_data.get("confluenceUser")
+    confluence_token = event_data.get("confluenceToken")
+    parent_page_id = event_data.get("confluenceParent")
+    last_sync_time = event_data.get("lastSyncTime")
+    project_id = event_data.get("projectId")
     namespace = project_id  # For example, you can set Pinecone namespace = projectId
-    data_source_id = data.get("id")
+    data_source_id = event_data.get("id")
 
     # get project details ( and subscription_id)
     project_details = psql.get_project_details(project_id=project_id)
