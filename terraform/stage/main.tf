@@ -240,6 +240,7 @@ locals {
 
 
 
+
 resource "google_project_service" "compute_api" {
   service                    = "compute.googleapis.com"
   disable_dependent_services = false
@@ -739,6 +740,7 @@ resource "google_storage_bucket" "function_bucket" {
   location = "us-central1"
 }
 
+
 # Create a subscription so that we don't lose messages published to dead letter topic
 resource "google_pubsub_subscription" "credit_usage_dead_letter_subscription" {
   name  = "credit_usage_dead_letter_subscription${local.fe_domain_suffix}"
@@ -808,6 +810,7 @@ resource "google_project_iam_member" "secretaccessor" {
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
 }
+
 resource "google_cloud_run_v2_service" "indexer_cloud_run" {
   for_each = toset(local.us_regions)
 
@@ -1141,23 +1144,190 @@ resource "google_pubsub_topic" "confluence_topic" {
   name = "confluence-topic-${local.environment}"
 }
 
-resource "google_cloud_run_v2_service" "confluence_cloud_run" {
-  for_each = toset(local.us_regions) # or local.regions if you prefer
+resource "google_pubsub_topic" "confluence_topic_dead_letter_topic" {
+  name                       = "confluence-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
 
-  name     = "confluence-indexer${local.indexer_domain_suffix}-${each.key}"
+# resource "google_cloud_run_v2_service" "confluence_cloud_run" {
+#   for_each = toset(local.us_regions) # or local.regions if you prefer
+
+#   name     = "confluence-indexer${local.indexer_domain_suffix}-${each.key}"
+#   location = each.key
+#   template {
+#     service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+#     scaling {
+#       max_instance_count = 1000  # or local.region_instance_counts[each.key].indexer_max_inst
+#       min_instance_count = 0
+#     }
+
+#     containers {
+#       ports {
+#         container_port = local.confluence_port
+#       }
+#       image = local.confluence_image
+
+#       # Example environment variables (adjust as needed)
+#       env {
+#         name  = "GCP_PROJECT_ID"
+#         value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+#       }
+#       env {
+#         name  = "GCP_CREDIT_USAGE_TOPIC"
+#         value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+#       }
+#       env {
+#         name  = "ENVIRONMENT"
+#         value = local.environment
+#       }
+#       env {
+#         name = "PSQL_PORT"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+#             version = "latest"
+#           }
+#         }
+
+#       }
+#        env {
+#         name = "REDIS_HOST"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+#             version = "latest"
+#           }
+#         }
+#       }
+#       env {
+#         name = "REDIS_PASSWORD"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+#             version = "latest"
+#           }
+#         }
+#       }
+#       env {
+#         name = "PSQL_HOST"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+#             version = "latest"
+#           }
+#         }
+
+#       }
+#       env {
+#         name = "PSQL_PASSWORD"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+#             version = "latest"
+#           }
+#         }
+
+#       }
+#       env {
+#         name = "PSQL_USERNAME"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+#             version = "latest"
+#           }
+#         }
+
+#       }
+#       env {
+#         name = "PSQL_DATABASE"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+#             version = "latest"
+#           }
+#         }
+
+#       }
+#       env {
+#         name = "SECRET_KEY"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+#             version = "latest"
+#           }
+#         }
+#       }
+#       env {
+#         name = "REDIS_PORT"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+#             version = "latest"
+#           }
+#         }
+#       }
+
+#       env {
+#         name = "PINECONE_API_KEY"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+#             version = "latest"
+#           }
+#         }
+#       }
+#       env {
+#         name = "PINECONE_INDEX_NAME"
+#         value_source {
+#           secret_key_ref {
+#             secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+#             version = "latest"
+#           }
+#         }
+#       }
+
+#       resources {
+#         limits = {
+#           cpu    = local.confluence_cpu
+#           memory = local.confluence_memory
+#         }
+#       }
+#     }
+#     max_instance_request_concurrency = 1
+#     timeout                          = "60s"
+#   }
+
+#   traffic {
+#     percent = 100
+#     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+#   }
+
+#   # Let’s assume you want only internal or private traffic:
+#   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY" 
+#   # or "INGRESS_TRAFFIC_ALL" if you want external access.
+  
+#   depends_on = [
+#     google_project_service.run_api,
+#     google_project_iam_member.indexer_eventreceiver,
+#     google_project_iam_member.indexer_runinvoker,
+#     google_project_iam_member.indexer_pubsubpublisher,
+#     google_project_iam_member.secretaccessor
+#   ]
+# }
+
+resource "google_cloud_run_v2_job" "confluence_cloud_run_job" {
+  for_each = toset(local.us_regions) # or local.regions if you prefer
+  name     = "confluence-job${local.indexer_domain_suffix}-${each.key}"
+  deletion_protection = false
   location = each.key
   template {
+  template {
     service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
-
-    scaling {
-      max_instance_count = 1000  # or local.region_instance_counts[each.key].indexer_max_inst
-      min_instance_count = 0
-    }
-
     containers {
       ports {
-        container_port = local.confluence_port
-      }
+         container_port = local.confluence_port
+       }
       image = local.confluence_image
 
       # Example environment variables (adjust as needed)
@@ -1286,18 +1456,12 @@ resource "google_cloud_run_v2_service" "confluence_cloud_run" {
         }
       }
     }
-    max_instance_request_concurrency = 1
-    timeout                          = "60s"
+    timeout     = "10800s" # 3 hours
   }
-
-  traffic {
-    percent = 100
-    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+    parallelism = 1     # Number of parallel tasks
+    task_count  = 1        # Each job runs as a single task
+    
   }
-
-  # Let’s assume you want only internal or private traffic:
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY" 
-  # or "INGRESS_TRAFFIC_ALL" if you want external access.
   
   depends_on = [
     google_project_service.run_api,
@@ -1308,36 +1472,132 @@ resource "google_cloud_run_v2_service" "confluence_cloud_run" {
   ]
 }
 
+# Generates an archive of the source code compressed as a .zip file.
+data "archive_file" "confluence_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../confluence-topic-function"
+  output_path = "${path.module}/confluence-topic-function.zip"
+}
 
-resource "google_eventarc_trigger" "confluence_trigger" {
-  for_each = toset(local.us_regions)
-
-  name     = "confluence-trigger-${each.key}-${local.environment}"
-  location = each.key  # or you can set `= each.key` if you want region-based triggers
-
-  matching_criteria {
-    attribute = "type"
-    value     = "google.cloud.pubsub.topic.v1.messagePublished"
-  }
-
-  # The transport block for Pub/Sub triggers
-  transport {
-    pubsub {
-      topic = google_pubsub_topic.confluence_topic.id
-    }
-  }
-
-  service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
-
-  destination {
-    cloud_run_service {
-      service = google_cloud_run_v2_service.confluence_cloud_run[each.key].name
-      region  = each.key
-    }
-  }
-
+# Add source confluence topic function code zip to the Cloud Function's bucket (Cloud_function_bucket) 
+resource "google_storage_bucket_object" "confluence_zip" {
+  source       = "${path.module}/confluence-topic-function.zip"
+  content_type = "application/zip"
+  name         = "confluence-topic-function${local.fe_domain_suffix}-${data.archive_file.confluence_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.confluence_topic_function_bucket.name
   depends_on = [
-    google_pubsub_topic.confluence_topic,
-    google_cloud_run_v2_service.confluence_cloud_run,
+    google_storage_bucket.confluence_topic_function_bucket,
+    data.archive_file.confluence_topic_function_source
   ]
 }
+
+resource "google_storage_bucket" "confluence_topic_function_bucket" {
+  name     = "confluence-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_cloudfunctions2_function" "confluence_trigger_function" {
+  name     = "confluence-topic-function-${local.environment}"
+  location = "us-central1"
+  event_trigger {
+    event_type   = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic = google_pubsub_topic.confluence_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_confluence_job"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.confluence_topic_function_bucket.name
+        object = "confluence-topic-function${local.fe_domain_suffix}-${data.archive_file.confluence_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 20
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.confluence_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+  depends_on = [
+    google_pubsub_topic.confluence_topic,
+    google_pubsub_topic.confluence_topic_dead_letter_topic,
+    google_cloud_run_v2_job.confluence_cloud_run_job
+  ]
+  }
+
+# resource "google_eventarc_trigger" "confluence_trigger" {
+#   for_each = toset(local.us_regions)
+
+#   name     = "confluence-trigger-${each.key}-${local.environment}"
+#   location = each.key  # or you can set `= each.key` if you want region-based triggers
+
+#   matching_criteria {
+#     attribute = "type"
+#     value     = "google.cloud.pubsub.topic.v1.messagePublished"
+#   }
+
+#   # The transport block for Pub/Sub triggers
+#   transport {
+#     pubsub {
+#       topic = google_pubsub_topic.confluence_topic.id
+#     }
+#   }
+
+#   service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+#   destination {
+#     cloud_run_service {
+#       service = google_cloud_run_v2_service.confluence_cloud_run[each.key].name
+#       region  = each.key
+#     }
+#   }
+
+#   depends_on = [
+#     google_pubsub_topic.confluence_topic,
+#     google_cloud_run_v2_service.confluence_cloud_run,
+#   ]
+# }
