@@ -7,6 +7,7 @@ import requests
 from google.cloud import run_v2
 from google.protobuf import json_format
 from google.protobuf.struct_pb2 import Struct
+from google.api_core import exceptions
 from shared import psql
 from shared.logging_config import log
 
@@ -35,7 +36,7 @@ def pubsub_to_cloud_run_confluence_job(event, context):
     try:
         message_data = base64.b64decode(pubsub_message).decode("utf-8")
         data = json.loads(message_data)
-        log.info(f"Data received from topic: {data}")
+        log.info(f"Data received from topic: ")
     except Exception as e:
         log.error(f"Error decoding Pub/Sub message: {str(e)}")
         return
@@ -52,7 +53,7 @@ def pubsub_to_cloud_run_confluence_job(event, context):
         # Get data source status:
         data_source_details = psql.get_data_source_details(data_source_id=dataSourceId)
         if not data_source_details:
-            log.info(f"No data source found with id {dataSourceId}")
+            log.info(f"No data source found with id ")
             return
 
         status = data_source_details.get("status")
@@ -73,40 +74,16 @@ def pubsub_to_cloud_run_confluence_job(event, context):
                 log.error("Missing environment variables for Cloud Run Job execution.")
                 return
 
-            # # Construct the REST API URL
-            # run_job_url = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/jobs/{job_name}:run"
-
-            # # Obtain an OAuth 2.0 access token using default credentials
-            # credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-            # credentials.refresh(google.auth.transport.requests.Request())
-            # access_token = credentials.token
-
-            # headers = {
-            #     "Authorization": f"Bearer {access_token}",
-            #     "Content-Type": "application/json",
-            # }
-
-            # # Prepare the request body with the event data
-            # request_body = {
-            #     "template": {
-            #         "template": {
-            #             "containers": [{
-            #                 "args": [json.dumps(data)]  # Pass event data as argument
-            #             }]
-            #         }
-            #     }
-            # }
             event_data_str = json.dumps(data)
 
-            log.info(f"Triggering Cloud Run Job: {job} with body: {event_data_str}")
+            log.info(f"Triggering Cloud Run Job:  with body: {event_data_str}")
 
-            # Make the REST API call to trigger the Cloud Run Job
             # Construct the override
             struct_obj = Struct()
             struct_obj.update({"event_data": event_data_str})
             # Create a run object
             run_request = run_v2.RunJobRequest(
-                name=job_name,
+                name=job_path,
                 overrides={
                     "container_overrides": [
                         {
@@ -122,18 +99,23 @@ def pubsub_to_cloud_run_confluence_job(event, context):
             )
 
             # Execute the job and log
-            response = client.run_job(request=run_request)
-            print(f"Job execution started: {response.name}")
+            try:
+                operation = client.run_job(request=run_request)
+                log.info(f"Job execution started: {operation.metadata}")
 
-            if response.status_code in [200, 201]:
-                log.info(
-                    f"Cloud Run Job triggered successfully. Response: {response.json()}"
-                )
-            else:
-                log.error(
-                    f"Failed to trigger Cloud Run Job. Status Code: {response.status_code}, Response: {response.text}"
-                )
-                # Optionally, implement retry logic or publish to a dead-letter queue
+                response = operation.result()
+                
+                log.info(f"Cloud Run Job triggered successfully. Response: {response}")
+
+            except exceptions.GoogleAPIError as e:
+                log.error(f"Failed to trigger Cloud Run Job. Error: {e}")
+                
+            except Exception as e:
+                log.error(f"Unknown error: {str(e)}")
+                
+
+        else:
+            log.info(f"Cloud Run Job not triggered as data source has status: {status}")
     except Exception as e:
         log.error(f"Error triggering Cloud Run Job: {str(e)}")
         sys.exit("Function execution failed.")

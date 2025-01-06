@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Flask, request
+# PIL
 from PIL import Image, UnidentifiedImageError
 
 # Atlassian + Pinecone
@@ -32,25 +32,12 @@ from shared.logging_config import log
 from shared import psql
 from pinecone import Pinecone
 
-# OPTIONAL: If you want to do encryption
-# from Crypto.Cipher import AES
-# from Crypto.Util.Padding import pad, unpad
-# from Crypto.Random import get_random_bytes
-
-app = Flask(__name__)
-
-# Initialize connection to Pinecone
-api_key = os.environ.get('PINECONE_API_KEY')
-index_name = os.environ.get('PINECONE_INDEX_NAME')
-pc = Pinecone(api_key=api_key)
-index = pc.Index(index_name)
-########################################################################
+######################################################################
 # MONKEY PATCHING
-########################################################################
+######################################################################
 
 # 1. Patch Confluence HTTP error handling
 original_raise_for_status = Confluence.raise_for_status
-
 
 def custom_raise_for_status(self, response):
     """
@@ -68,12 +55,10 @@ def custom_raise_for_status(self, response):
         else:
             raise HTTPError(error_msg, response=response)
 
-
 Confluence.raise_for_status = custom_raise_for_status
 
 # 2. Patch Pillow large-file bomb check
 _decompression_bomb_check_orig = Image._decompression_bomb_check
-
 
 def custom_decompression_bomb_check(size):
     try:
@@ -82,13 +67,11 @@ def custom_decompression_bomb_check(size):
         log.info(f"Monkey patched: File size exceeded: {str(e)}")
         return False
 
-
 setattr(Image, "_decompression_bomb_check", custom_decompression_bomb_check)
 
-########################################################################
+######################################################################
 # HELPER FUNCTIONS
-########################################################################
-
+######################################################################
 
 def get_event_loop():
     """
@@ -101,7 +84,6 @@ def get_event_loop():
         asyncio.set_event_loop(loop)
     return loop
 
-
 def generate_md5_hash(*args):
     """
     Generates an MD5 hash from the JSON-serialized arguments.
@@ -110,7 +92,6 @@ def generate_md5_hash(*args):
     combined_string = "|".join(serialized_args)
     md5_hash = hashlib.md5(combined_string.encode("utf-8")).hexdigest()
     return md5_hash
-
 
 async def get_google_embedding(queries, model_name="text-multilingual-embedding-preview-0409"):
     """
@@ -123,10 +104,9 @@ async def get_google_embedding(queries, model_name="text-multilingual-embedding-
     log.info("Embeddings fetched successfully.")
     return embeddings
 
-
-########################################################################
+######################################################################
 # MAIN CONFLUENCE INGEST FUNCTION
-########################################################################
+######################################################################
 
 def process_confluence_requests(
     confluence_url: str,
@@ -152,6 +132,12 @@ def process_confluence_requests(
     log.debug(f"Parameters => confluence_url: {confluence_url}, user: {confluence_user}, "
               f"parent_page_id: {parent_page_id}, project_id: {project_id}, subscription_id: {subscription_id}, "
               f"namespace: {namespace}, last_sync_time: {last_sync_time}")
+
+    # Initialize Pinecone
+    api_key = os.environ.get('PINECONE_API_KEY')
+    index_name = os.environ.get('PINECONE_INDEX_NAME')
+    pc = Pinecone(api_key=api_key)
+    index = pc.Index(index_name)
 
     # (1) Optional: check subscription credits via psql
     if subscription_id:
@@ -216,14 +202,9 @@ def process_confluence_requests(
         log.exception("Failed to fetch child page IDs:")
         return
     
-   # (A) If last_sync_time is empty => full sync
-    # (B) If last_sync_time is present => partial sync
-    #    We fetch existing DB records + do "only updated" logic
-    existing_files_by_page_id = {}  # e.g. { <page_id>: <file_record_dict> }
-
+    # Convert string lastSyncTime => datetime
     if last_sync_time:
         log.info(f"Incremental sync: lastSyncTime = {last_sync_time}")
-        # Convert `last_sync_time` to datetime if needed
         if isinstance(last_sync_time, str):
             try:
                 last_sync_time_dt = datetime.fromisoformat(last_sync_time)
@@ -236,24 +217,19 @@ def process_confluence_requests(
         log.info("No lastSyncTime provided => full sync of all pages.")
         last_sync_time_dt = None
 
-    # (A) Fetch existing files in DB for this dataSourceId => so we can see what we have
+    # (A) Fetch existing files in DB for this dataSourceId
     existing_files = psql.fetch_files_by_data_source_id(data_source_id)
+    existing_files_by_page_id = {}
     for ef in existing_files:
-        # e.g. in DB, we store pageID in some column or we need to parse from file_key
-        # If you stored "pageId" in "file_key" or separate column, adapt accordingly
-        # Suppose we have a column "pageId" in the DB or "key" in metadata
-        page_id_db = ef.get("pageId")  # or some other approach
+        page_id_db = ef.get("pageId")
         if page_id_db:
             existing_files_by_page_id[page_id_db] = ef
 
-    # (B) We'll identify pages to ingest and files to delete
-    #  1) For each confluence child_id, check if "page" is new or updated => ingest
-    #  2) For each existing file => if not in child_ids => delete
+    # (B) Identify pages to ingest and files to delete
     child_batch_size = 50
     processed_pages_count = 0
 
-    # (B1) Collect pages that are in DB but not in child_ids => remove them
-    # e.g. we have existing_files_by_page_id keys that are not in child_ids
+    # (B1) For pages in DB but not in Confluence => remove
     db_page_ids = set(existing_files_by_page_id.keys())
     confluence_page_ids = set(child_ids)
     removed_page_ids = db_page_ids - confluence_page_ids
@@ -264,9 +240,6 @@ def process_confluence_requests(
         file_id_to_delete = file_record.get("id")
         if file_id_to_delete:
             # 1) Delete from Pinecone
-            #    typically we have "fileId" or something => build the vector ID
-            #    e.g. fileRecord might have a column "id" => we used it in vector "file_id#project_id"
-            #    If the DB 'id' is "myFileId" => vector_id = "myFileId#<projectId>"
             vector_id = f"{file_id_to_delete}#{project_id}"
             try:
                 index.delete(ids=[vector_id], namespace=namespace)
@@ -278,43 +251,34 @@ def process_confluence_requests(
             psql.delete_file_by_id(file_id_to_delete)
             log.info(f"Deleted DB file id={file_id_to_delete} for pageId={rp_id}")
 
-    # (B2) For each child_id in child_ids => check lastModified from Confluence
-    # We can do e.g. confluence.get_page_by_id(..., expand='version')
+    # (B2) For each child_id => check lastModified from Confluence
     for i in range(0, len(child_ids), child_batch_size):
         batch_page_ids = child_ids[i : i + child_batch_size]
         log.info(
             f"Processing batch {i // child_batch_size + 1} with {len(batch_page_ids)} pages out of {len(child_ids)} total."
         )
 
-        # We'll fetch the docs with ConfluenceLoader or we do a direct confluence.get_page_by_id for lastModified
-        # If the page is older than lastSyncTime => skip
-        # If no last_sync_time => process anyway
-
-        # Could do a direct approach:
         updated_batch_page_ids = []
         for page_id in batch_page_ids:
             try:
                 page_info = confluence.get_page_by_id(page_id, expand="version")
-                # page_info['version']['when'] e.g. "2023-08-24T20:58:47.000Z"
                 page_last_modified_str = page_info.get("version", {}).get("when")
                 if not page_last_modified_str:
+                    # If no version info, treat as updated
                     updated_batch_page_ids.append(page_id)
                     continue
 
-                # Convert string to datetime
-                # Confluence typically returns e.g. "2023-08-24T20:58:47.000Z"
                 page_last_modified_dt = datetime.fromisoformat(
                     page_last_modified_str.replace("Z", "+00:00")
                 )
 
                 if last_sync_time_dt:
                     if page_last_modified_dt > last_sync_time_dt:
-                        # page is newer => process
                         updated_batch_page_ids.append(page_id)
                     else:
                         log.info(f"Page {page_id} not changed since last sync => skipping.")
                 else:
-                    # no last sync => always process
+                    # full sync
                     updated_batch_page_ids.append(page_id)
 
             except Exception as e:
@@ -325,7 +289,7 @@ def process_confluence_requests(
             log.info("No updated pages in this batch => skipping ingestion.")
             continue
 
-        # (C) Load raw documents from Confluence for the updated pages
+        # (C) Load raw documents from Confluence
         loader = ConfluenceLoader(
             url=confluence_url,
             username=confluence_user,
@@ -360,10 +324,7 @@ def process_confluence_requests(
 
             now_dt = datetime.now()
 
-            # Check if file is new or existing in DB
-            # e.g. existing_files_by_page_id.get(page_id)
-            # If the file_id is the same (some logic?), we can update or re-insert
-            # We'll do the same psql.add_new_file flow (or psql.update_file) if you prefer
+            # Upsert / Insert into psql
             try:
                 psql.add_new_file(
                     file_id,
@@ -418,8 +379,10 @@ def process_confluence_requests(
     # (10) Final status update in psql
     if processed_pages_count > 0:
         try:
+            # If needed, you can update a specific file's status or all processed ones
+            # We'll just assume the last file_id is the one to mark as processed
             psql.update_file_status(
-                file_id=file_id,  # last processed
+                file_id=file_id,
                 status="processed",
                 page_count=processed_pages_count,
                 updated_at=datetime.now(),
@@ -432,74 +395,81 @@ def process_confluence_requests(
     log.info("Confluence ingestion (incremental sync) completed successfully.")
 
 
-########################################################################
-# PUB/SUB ENDPOINT FOR CLOUD RUN
-########################################################################
+######################################################################
+# MAIN ENTRYPOINT FOR CLOUD RUN JOB
+######################################################################
 
-@app.route("/", methods=["POST"])
-def event_handler():
+def run_job():
     """
-    Cloud Run endpoint to handle cloud run function request.
-    Th ecloud run function triggered from pub/sub sends a message from GCP topic 'confluence-topic-{env}',
-    and that message triggers this container.
+    Main entrypoint function for Cloud Run Job.
+    Reads environment variables, parses data, then calls process_confluence_requests().
     """
-    data = request.get_json()
-    log.info(f"Event Data: {data}")
-    DATA_SOURCE_CONFIG = os.environ.get("DATA_SOURCE_CONFIG")
-    event_data = json.loads(json.loads(DATA_SOURCE_CONFIG).get("event_data"))
-    log.info(f"Cloud Run Job received data: {event_data}") 
-    # Extract parameters from the message
+    # Example: we expect your "DATA_SOURCE_CONFIG" to be a JSON string in the environment.
+    # Adjust accordingly based on how you pass in arguments to the job.
+    data_source_config = os.environ.get("DATA_SOURCE_CONFIG")
+    if not data_source_config:
+        log.error("DATA_SOURCE_CONFIG env var is missing.")
+        sys.exit(1)
+
+    try:
+        # If your config itself is nested JSON, parse accordingly:
+        config = json.loads(data_source_config)
+        event_data = json.loads(config.get("event_data", "{}"))
+        log.info(f"Cloud Run Job: parsed event_data: {event_data}")
+    except Exception as e:
+        log.exception("Failed to parse DATA_SOURCE_CONFIG:")
+        sys.exit(1)
+
+    # Extract parameters
     confluence_url = event_data.get("confluenceUrl")
     confluence_user = event_data.get("confluenceUser")
     confluence_token = event_data.get("confluenceToken")
     parent_page_id = event_data.get("confluenceParent")
     last_sync_time = event_data.get("lastSyncTime")
     project_id = event_data.get("projectId")
-    namespace = project_id  # For example, you can set Pinecone namespace = projectId
     data_source_id = event_data.get("id")
 
-    # get project details ( and subscription_id)
-    project_details = psql.get_project_details(project_id=project_id)
-    if project_details:
-        # Proceed with processing the project details
-        log.info(f"Project Details: {project_details}")
-        subscription_id = project_details.get("subscriptionId")
-        # Validate required fields
-        required_fields = {
-            "confluenceURL": confluence_url,
-            "confluenceUser": confluence_user,
-            "confluenceToken": confluence_token,
-            "parentPageId": parent_page_id,
-            "projectId": project_id,
-            "dataSourceId": data_source_id,
-            "subscriptionId": subscription_id,
-        }
-        missing = [k for k, v in required_fields.items() if not v]
-        if missing:
-            log.error(f"Missing required fields: {missing}")
-            return (f"Bad Request: Missing fields {missing}", 400)
+    # Use projectId as Pinecone namespace, for example
+    namespace = project_id
 
-        try:
-            process_confluence_requests(
-                confluence_url=confluence_url,
-                confluence_user=confluence_user,
-                confluence_token=confluence_token,
-                parent_page_id=parent_page_id,
-                data_source_id=data_source_id,
-                project_id=project_id,
-                namespace=namespace,
-                subscription_id=subscription_id,
-                embedding_model_name="text-multilingual-embedding-preview-0409",
-                last_sync_time=last_sync_time
-            )
-            return ("OK", 200)
-        except Exception as e:
-            log.exception("Error in process_confluence_requests:")
-            return ("Internal Server Error", 500)
+    # Retrieve subscriptionId from your DB if desired
+    project_details = psql.get_project_details(project_id=project_id)
+    subscription_id = project_details.get("subscriptionId") if project_details else None
+
+    # Validate required fields
+    required_fields = {
+        "confluenceURL": confluence_url,
+        "confluenceUser": confluence_user,
+        "confluenceToken": confluence_token,
+        "parentPageId": parent_page_id,
+        "projectId": project_id,
+        "dataSourceId": data_source_id,
+    }
+    missing = [k for k, v in required_fields.items() if not v]
+    if missing:
+        log.error(f"Missing required fields: {missing}")
+        sys.exit(1)
+
+    # Run your main ingestion
+    try:
+        process_confluence_requests(
+            confluence_url=confluence_url,
+            confluence_user=confluence_user,
+            confluence_token=confluence_token,
+            parent_page_id=parent_page_id,
+            data_source_id=data_source_id,
+            project_id=project_id,
+            namespace=namespace,
+            subscription_id=subscription_id,
+            embedding_model_name="text-multilingual-embedding-preview-0409",
+            last_sync_time=last_sync_time
+        )
+        log.info("Job completed successfully.")
+    except Exception as e:
+        log.exception("Error in process_confluence_requests:")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    # For local testing/debugging:
-    # You can run: `python main.py` then do e.g. a local request with Cloud Run or a similar approach
-    # In Cloud Run, Gunicorn usually calls app, not this block.
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    # For local testing: just call run_job()
+    run_job()

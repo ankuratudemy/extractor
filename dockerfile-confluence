@@ -4,29 +4,45 @@ FROM python:3.10-slim
 # Set the working directory in the container
 WORKDIR /app
 
-# Install Java, wget, and SSL dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr poppler-utils libcairo2-dev libgirepository1.0-dev wget ca-certificates openssl apt-transport-https  unoconv fontconfig software-properties-common libxinerama1 ibus 
+# Install Java, wget, and SSL dependencies (and everything else you need)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    poppler-utils \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    wget \
+    ca-certificates \
+    openssl \
+    apt-transport-https \
+    unoconv \
+    fontconfig \
+    software-properties-common \
+    libxinerama1 \
+    ibus
 
+# Copy requirements and install
 COPY requirements-confluence.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
 # Create a new directory called "uploads"
 RUN mkdir /app/uploads
 
-RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
-RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+# Add bookworm contrib sources (needed for MS fonts, etc.)
+RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list && \
+    echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
 
-RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
+RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer
 
-#RUN rm -Rf /usr/share/fonts/*
-#RUN ls -ltr /usr/share/fonts
+# Copy your custom fonts into the container
 COPY /fonts/* /usr/share/fonts
-
 RUN ls -ltr /usr/share/fonts
 RUN fc-cache -f -v
 RUN fc-list
-RUN  apt-get install --yes --no-install-recommends tesseract-ocr-all \
-    && echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections \
-    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+
+# Install Tesseract extras, more fonts, etc., then clean up
+RUN apt-get install --yes --no-install-recommends tesseract-ocr-all && \
+    echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
         xfonts-utils \
         fonts-freefont-ttf \
         fonts-liberation \
@@ -34,18 +50,22 @@ RUN  apt-get install --yes --no-install-recommends tesseract-ocr-all \
         fonts-beng \
         ttf-mscorefonts-installer \
         wget \
-        cabextract \
-    && apt-get clean -y \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-# RUN wget -O find_uno.py --no-check-certificate https://gist.githubusercontent.com/regebro/036da022dc7d5241a0ee97efdf1458eb/raw/find_uno.py
-# RUN python3 find_uno.py
+        cabextract && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Copy shared code, service account key, and your main app
 COPY ./shared /app/shared
 COPY ./SAKeys/fe-key.json key.json
-# Copy the application code to the container
 COPY app-confluence.py app.py
+
+# Rebuild font cache (just in case)
 RUN fc-cache -f -v
-# Expose port 5000 for the Flask application
-EXPOSE 5000
+
+# Tell Python where to find your service account credentials
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/key.json
-# Run app.py when the container launches
-CMD ["gunicorn", "-w", "1", "--worker-connections", "1", "-b", "0.0.0.0:5000","--timeout", "0", "app:app"]
+
+# For Cloud Run JOB, we typically do NOT EXPOSE a port
+
+# In a Cloud Run Job, you typically just run your script once:
+CMD ["python", "app.py"]

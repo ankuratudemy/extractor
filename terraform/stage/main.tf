@@ -35,7 +35,7 @@ locals {
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-261.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-8.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-12.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -1317,152 +1317,155 @@ resource "google_pubsub_topic" "confluence_topic_dead_letter_topic" {
 # }
 
 resource "google_cloud_run_v2_job" "confluence_cloud_run_job" {
-  for_each = toset(local.us_regions) # or local.regions if you prefer
-  name     = "confluence-job${local.indexer_domain_suffix}-${each.key}"
-  deletion_protection = false
-  location = each.key
-  template {
-  template {
-    service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
-    containers {
-      ports {
-         container_port = local.confluence_port
-       }
-      image = local.confluence_image
-
-      # Example environment variables (adjust as needed)
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
-      }
-      env {
-        name  = "GCP_CREDIT_USAGE_TOPIC"
-        value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
-      }
-      env {
-        name  = "ENVIRONMENT"
-        value = local.environment
-      }
-      env {
-        name = "PSQL_PORT"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
-            version = "latest"
-          }
-        }
-
-      }
-       env {
-        name = "REDIS_HOST"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name = "REDIS_PASSWORD"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name = "PSQL_HOST"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
-            version = "latest"
-          }
-        }
-
-      }
-      env {
-        name = "PSQL_PASSWORD"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
-            version = "latest"
-          }
-        }
-
-      }
-      env {
-        name = "PSQL_USERNAME"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
-            version = "latest"
-          }
-        }
-
-      }
-      env {
-        name = "PSQL_DATABASE"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
-            version = "latest"
-          }
-        }
-
-      }
-      env {
-        name = "SECRET_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name = "REDIS_PORT"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
-            version = "latest"
-          }
-        }
-      }
-
-      env {
-        name = "PINECONE_API_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name = "PINECONE_INDEX_NAME"
-        value_source {
-          secret_key_ref {
-            secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
-            version = "latest"
-          }
-        }
-      }
-
-      resources {
-        limits = {
-          cpu    = local.confluence_cpu
-          memory = local.confluence_memory
-        }
-      }
-    }
-    timeout     = "10800s" # 3 hours
-  }
-    parallelism = 1     # Number of parallel tasks
-    task_count  = 1        # Each job runs as a single task
-    
-  }
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
   
+  # Name your job. You can tweak this however you like.
+  name               = "confluence-job${local.indexer_domain_suffix}-${each.key}"
+  deletion_protection = false
+  location           = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+      
+      containers {
+        # Remove the "ports" block entirely for a Cloud Run Job
+        image = local.confluence_image
+
+        # Pass environment variables/secrets into your container:
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        # Set resource limits
+        resources {
+          limits = {
+            cpu    = local.confluence_cpu
+            memory = local.confluence_memory
+          }
+        }
+      }
+
+      # Increase the timeout if you expect the job to run a while
+      timeout = "10800s" # 3 hours
+    }
+
+    # For one-off ingestion, usually parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
   depends_on = [
     google_project_service.run_api,
     google_project_iam_member.indexer_eventreceiver,
@@ -1471,6 +1474,7 @@ resource "google_cloud_run_v2_job" "confluence_cloud_run_job" {
     google_project_iam_member.secretaccessor
   ]
 }
+
 
 # Generates an archive of the source code compressed as a .zip file.
 data "archive_file" "confluence_topic_function_source" {
@@ -1495,7 +1499,20 @@ resource "google_storage_bucket" "confluence_topic_function_bucket" {
   name     = "confluence-function-bucket${local.fe_domain_suffix}"
   location = "us-central1"
 }
+resource "google_cloud_run_service_iam_binding" "confluence_function_cloud_run_iam_binding" {
+  project = google_cloudfunctions2_function.confluence_trigger_function.project
+  location =  google_cloudfunctions2_function.confluence_trigger_function.location
+  service  = google_cloudfunctions2_function.confluence_trigger_function.name
+  role     = "roles/run.invoker"
+  members = [
+    "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
+  ]
+  depends_on = [ google_cloudfunctions2_function.confluence_trigger_function ]
 
+   lifecycle {
+    replace_triggered_by = [ google_cloudfunctions2_function.confluence_trigger_function ]
+  }
+}
 resource "google_cloudfunctions2_function" "confluence_trigger_function" {
   name     = "confluence-topic-function-${local.environment}"
   location = "us-central1"
@@ -1515,7 +1532,6 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
         object = "confluence-topic-function${local.fe_domain_suffix}-${data.archive_file.confluence_topic_function_source.output_md5}.zip"
       }
     }
-    service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
   }
 
   service_config {
@@ -1569,6 +1585,8 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
     google_cloud_run_v2_job.confluence_cloud_run_job
   ]
   }
+
+
 
 # resource "google_eventarc_trigger" "confluence_trigger" {
 #   for_each = toset(local.us_regions)
