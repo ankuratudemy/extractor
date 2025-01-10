@@ -29,8 +29,11 @@ from vertexai.preview.language_models import TextEmbeddingModel
 
 # Shared code imports
 from shared.logging_config import log
-from shared import psql
+from shared import psql, google_pub_sub
 from pinecone import Pinecone
+
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
 
 ######################################################################
 # MONKEY PATCHING
@@ -57,6 +60,7 @@ def custom_raise_for_status(self, response):
 
 Confluence.raise_for_status = custom_raise_for_status
 
+
 # 2. Patch Pillow large-file bomb check
 _decompression_bomb_check_orig = Image._decompression_bomb_check
 
@@ -68,6 +72,7 @@ def custom_decompression_bomb_check(size):
         return False
 
 setattr(Image, "_decompression_bomb_check", custom_decompression_bomb_check)
+
 
 ######################################################################
 # HELPER FUNCTIONS
@@ -104,6 +109,7 @@ async def get_google_embedding(queries, model_name="text-multilingual-embedding-
     log.info("Embeddings fetched successfully.")
     return embeddings
 
+
 ######################################################################
 # MAIN CONFLUENCE INGEST FUNCTION
 ######################################################################
@@ -118,7 +124,7 @@ def process_confluence_requests(
     namespace: str,
     subscription_id: str = None,
     embedding_model_name: str = "text-multilingual-embedding-preview-0409",
-    last_sync_time: datetime = None
+    last_sync_time=None  # Could be string or datetime
 ):
     """
     Combines:
@@ -127,11 +133,14 @@ def process_confluence_requests(
     - Pinecone ingestion
     - psql usage (e.g. checking credits, updating status)
     - Incremental sync logic based on last_sync_time and existing files in DB.
+    Additionally processes new pages that are present in Confluence but not in the DB.
     """
     log.info("Starting Confluence ingestion with incremental sync logic...")
-    log.debug(f"Parameters => confluence_url: {confluence_url}, user: {confluence_user}, "
-              f"parent_page_id: {parent_page_id}, project_id: {project_id}, subscription_id: {subscription_id}, "
-              f"namespace: {namespace}, last_sync_time: {last_sync_time}")
+    log.debug(
+        f"Parameters => confluence_url: {confluence_url}, user: {confluence_user}, "
+        f"parent_page_id: {parent_page_id}, project_id: {project_id}, subscription_id: {subscription_id}, "
+        f"namespace: {namespace}, last_sync_time: {last_sync_time}"
+    )
 
     # Initialize Pinecone
     api_key = os.environ.get('PINECONE_API_KEY')
@@ -166,7 +175,7 @@ def process_confluence_requests(
         length_function=len,
         is_separator_regex=False,
     )
-    
+
     # (5) Recursive function to gather child page IDs
     def get_all_child_ids(page_id):
         """
@@ -202,92 +211,140 @@ def process_confluence_requests(
         log.exception("Failed to fetch child page IDs:")
         return
     
-    # Convert string lastSyncTime => datetime
+    # Ensure the parent_page_id is included
+    if parent_page_id not in child_ids:
+        log.info(f"Parent page ID {parent_page_id} not in child_ids. Adding it explicitly.")
+        child_ids.append(parent_page_id)
+
+    # (5b) Convert lastSyncTime => UTC datetime (if it's a string)
+    last_sync_time_dt = None
     if last_sync_time:
-        log.info(f"Incremental sync: lastSyncTime = {last_sync_time}")
         if isinstance(last_sync_time, str):
+            # e.g. "2025-01-07T05:22:05.339Z"
             try:
-                last_sync_time_dt = datetime.fromisoformat(last_sync_time)
+                # parse using strptime
+                last_sync_time_dt = datetime.strptime(last_sync_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+                # mark it as UTC
+                last_sync_time_dt = last_sync_time_dt.replace(tzinfo=timezone.utc)
+                log.info(f"Parsed lastSyncTime as => {last_sync_time_dt.isoformat()}")
             except ValueError:
                 log.warning(f"Invalid lastSyncTime format: {last_sync_time}, ignoring.")
                 last_sync_time_dt = None
         else:
+            # If last_sync_time was already a datetime obj
             last_sync_time_dt = last_sync_time
+            # If it’s naive, we might want to set tzinfo=timezone.utc
+            if last_sync_time_dt.tzinfo is None:
+                last_sync_time_dt = last_sync_time_dt.replace(tzinfo=timezone.utc)
     else:
         log.info("No lastSyncTime provided => full sync of all pages.")
-        last_sync_time_dt = None
 
     # (A) Fetch existing files in DB for this dataSourceId
     existing_files = psql.fetch_files_by_data_source_id(data_source_id)
-    existing_files_by_page_id = {}
+
+    # Build a set of all file_ids in DB (these are the MD5-hash-based IDs or 'key')
+    db_file_keys = set()
+    file_map = {}  # Map from file_id -> file record
     for ef in existing_files:
-        page_id_db = ef.get("pageId")
-        if page_id_db:
-            existing_files_by_page_id[page_id_db] = ef
+        # In your table, "id" is the MD5 you created. 
+        file_id_db = ef["id"]
+        db_file_keys.add(file_id_db)
+        file_map[file_id_db] = ef
 
-    # (B) Identify pages to ingest and files to delete
-    child_batch_size = 50
-    processed_pages_count = 0
+    # (B) Identify which files should remain (based on Confluence child page IDs)
+    confluence_file_keys = set()
 
-    # (B1) For pages in DB but not in Confluence => remove
-    db_page_ids = set(existing_files_by_page_id.keys())
-    confluence_page_ids = set(child_ids)
-    removed_page_ids = db_page_ids - confluence_page_ids
-    log.info(f"Pages in DB but not in Confluence => to be removed: {removed_page_ids}")
+    # If you have a subscription_id, replicate the logic you used for hashing:
+    sub_for_hash = subscription_id if subscription_id else "no_subscription"
+    log.info(f"sub_for_hash: {sub_for_hash}")
+    page_id_to_file_key = {}  # Map page_id to file_key for easy lookup
+    for c_page_id in child_ids:
+        log.info(f"c_page_id: {c_page_id}")
+        c_file_key = generate_md5_hash(sub_for_hash, project_id, c_page_id)
+        confluence_file_keys.add(c_file_key)
+        page_id_to_file_key[c_page_id] = c_file_key
 
-    for rp_id in removed_page_ids:
-        file_record = existing_files_by_page_id[rp_id]
-        file_id_to_delete = file_record.get("id")
-        if file_id_to_delete:
-            # 1) Delete from Pinecone
-            vector_id = f"{file_id_to_delete}#{project_id}"
-            try:
-                index.delete(ids=[vector_id], namespace=namespace)
-                log.info(f"Deleted Pinecone vector {vector_id}")
-            except Exception as e:
-                log.exception(f"Error deleting vector {vector_id} from Pinecone:")
+    # (C) Determine which file keys in DB are NOT present in Confluence -> remove them
+    removed_file_keys = db_file_keys - confluence_file_keys
+    log.info(f"Files in DB but not in Confluence => to be removed: {removed_file_keys}")
 
-            # 2) Delete from PostgreSQL
-            psql.delete_file_by_id(file_id_to_delete)
-            log.info(f"Deleted DB file id={file_id_to_delete} for pageId={rp_id}")
+    for r_key in removed_file_keys:
+        file_record = file_map[r_key]
+        # Step 1) Remove from Pinecone
+        vector_id = f"{data_source_id}#{r_key}#{project_id}"
+        try:
+            index.delete(ids=[vector_id], namespace=namespace)
+            log.info(f"Deleted Pinecone vector {vector_id}")
+        except Exception as e:
+            log.exception(f"Error deleting vector {vector_id} from Pinecone:")
 
-    # (B2) For each child_id => check lastModified from Confluence
-    for i in range(0, len(child_ids), child_batch_size):
-        batch_page_ids = child_ids[i : i + child_batch_size]
-        log.info(
-            f"Processing batch {i // child_batch_size + 1} with {len(batch_page_ids)} pages out of {len(child_ids)} total."
-        )
+        # Step 2) Remove from PostgreSQL
+        try:
+            psql.delete_file_by_id(r_key)  # r_key = MD5-based ID
+            log.info(f"Deleted DB File with ID={r_key}")
+        except Exception as e:
+            log.exception(f"Error deleting DB file {r_key}:")
 
-        updated_batch_page_ids = []
-        for page_id in batch_page_ids:
+    # (D) Identify New and Updated Pages
+    new_page_ids = []
+    updated_page_ids = []
+
+    for page_id in child_ids:
+        file_key = page_id_to_file_key.get(page_id)
+        if not file_key:
+            log.warning(f"No file key found for page_id {page_id}, skipping.")
+            continue
+
+        if file_key not in db_file_keys:
+            # New Page
+            new_page_ids.append(page_id)
+            log.info(f"Identified new page: {page_id}")
+        else:
+            # Existing Page - check if updated
             try:
                 page_info = confluence.get_page_by_id(page_id, expand="version")
                 page_last_modified_str = page_info.get("version", {}).get("when")
                 if not page_last_modified_str:
                     # If no version info, treat as updated
-                    updated_batch_page_ids.append(page_id)
+                    updated_page_ids.append(page_id)
                     continue
 
-                page_last_modified_dt = datetime.fromisoformat(
-                    page_last_modified_str.replace("Z", "+00:00")
-                )
+                # parse Confluence's time, e.g. "2025-01-07T05:22:05.339Z"
+                page_last_modified_dt = datetime.strptime(
+                    page_last_modified_str, "%Y-%m-%dT%H:%M:%S.%fZ"
+                ).replace(tzinfo=timezone.utc)
 
                 if last_sync_time_dt:
                     if page_last_modified_dt > last_sync_time_dt:
-                        updated_batch_page_ids.append(page_id)
+                        updated_page_ids.append(page_id)
                     else:
                         log.info(f"Page {page_id} not changed since last sync => skipping.")
                 else:
                     # full sync
-                    updated_batch_page_ids.append(page_id)
+                    updated_page_ids.append(page_id)
 
             except Exception as e:
                 log.exception(f"Failed to retrieve page info for {page_id}, skipping:")
                 continue
 
-        if not updated_batch_page_ids:
-            log.info("No updated pages in this batch => skipping ingestion.")
-            continue
+    log.info(f"Total new pages to process: {len(new_page_ids)}")
+    log.info(f"Total updated pages to process: {len(updated_page_ids)}")
+
+    # Combine new and updated page IDs
+    pages_to_process = new_page_ids + updated_page_ids
+
+    if not pages_to_process:
+        log.info("No new or updated pages to process. Ingestion complete.")
+        return
+
+    # Process pages in batches
+    page_batch_size = 50
+    for i in range(0, len(pages_to_process), page_batch_size):
+        batch_page_ids = pages_to_process[i : i + page_batch_size]
+        log.info(
+            f"Processing batch {i // page_batch_size + 1} with {len(batch_page_ids)} "
+            f"pages out of {len(pages_to_process)} total."
+        )
 
         # (C) Load raw documents from Confluence
         loader = ConfluenceLoader(
@@ -297,11 +354,12 @@ def process_confluence_requests(
             include_attachments=True,
             limit=50,
             max_pages=5000,
-            page_ids=updated_batch_page_ids,
+            page_ids=batch_page_ids,
         )
 
         try:
             documents = loader.load()
+            log.info(f"Loaded {len(documents)} documents from Confluence.")
         except Exception as e:
             log.exception("Error loading documents from Confluence:")
             continue
@@ -322,7 +380,7 @@ def process_confluence_requests(
             sub_for_hash = subscription_id if subscription_id else "no_subscription"
             file_id = generate_md5_hash(sub_for_hash, project_id, page_id)
 
-            now_dt = datetime.now()
+            now_dt = datetime.now(timezone.utc)
 
             # Upsert / Insert into psql
             try:
@@ -340,19 +398,22 @@ def process_confluence_requests(
                     source_type="confluence",
                     project_id=project_id,
                 )
+                log.info(f"Added new file record for file_id: {file_id}")
             except Exception as e:
                 log.exception(f"Failed to add new file record in psql for doc {page_id}:")
 
             # Create embedding
             try:
-                embedding_result = asyncio.run(get_google_embedding([page_content], embedding_model_name))
+                embedding_result = asyncio.run(
+                    get_google_embedding([page_content], embedding_model_name)
+                )
                 embedding = embedding_result[0]
             except Exception as e:
                 log.exception(f"Error creating embeddings for doc {page_id}:")
                 continue
 
             # Prepare vector
-            vector_id = f"{file_id}#{project_id}"
+            vector_id = f"{data_source_id}#{file_id}#{project_id}"
             vector_metadata = {
                 "text": page_content,
                 "sourceType": "Confluence",
@@ -368,31 +429,51 @@ def process_confluence_requests(
 
             if (local_counter % batch_size == 0) or (idx == len(docs)):
                 try:
-                    log.info(f"Upserting {len(pinecone_vectors)} vectors to Pinecone (batch upsert).")
+                    log.info(
+                        f"Upserting {len(pinecone_vectors)} vectors to Pinecone (batch upsert)."
+                    )
                     index.upsert(vectors=pinecone_vectors, namespace=namespace)
+                    log.info("Pinecone upsert successful.")
+
+                    # **BEGIN: Update file status to 'processed' after successful upsert**
+                    for vector in pinecone_vectors:
+                        _, _, metadata = vector
+                        page_id = metadata.get("pageId", "unknown_id")
+                        file_id_to_update = generate_md5_hash(
+                            sub_for_hash, project_id, page_id
+                        )
+                        try:
+                            psql.update_file_status(
+                                file_id=file_id_to_update,
+                                status="processed",
+                                page_count=1,  # Adjust if multiple pages per file
+                                updated_at=datetime.now(timezone.utc),
+                            )
+                            log.info(f"Updated status to 'processed' for file_id: {file_id_to_update}")
+                            used_credits = 1
+                            message = json.dumps(
+                                {
+                                    "subscription_id": subscription_id,
+                                    "data_source_id": data_source_id,
+                                    "project_id": project_id,
+                                    "creditsUsed": used_credits,
+                                }
+                            )
+                            google_pub_sub.publish_messages_with_retry_settings(
+                                GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message
+                            )
+                        except Exception as e:
+                            log.exception(f"Failed to update status for file_id {file_id_to_update}:")
+                    # **END: Update file status to 'processed'**
+
                 except Exception as e:
                     log.exception("Error upserting to Pinecone:")
-                pinecone_vectors.clear()
+                finally:
+                    pinecone_vectors.clear()
 
-            processed_pages_count += 1
-
-        log.info(f"Finished processing updated doc-chunks from pages: {updated_batch_page_ids}")
-
-    # (10) Final status update in psql
-    if processed_pages_count > 0:
-        try:
-            # If needed, you can update a specific file's status or all processed ones
-            # We'll just assume the last file_id is the one to mark as processed
-            psql.update_file_status(
-                file_id=file_id,
-                status="processed",
-                page_count=processed_pages_count,
-                updated_at=datetime.now(),
-            )
-        except Exception as e:
-            log.exception("Error updating final file status in psql:")
-    else:
-        log.info("No pages processed or no docs found; skipping final status update.")
+        log.info(
+            f"Finished processing doc-chunks from pages: {batch_page_ids}"
+        )
 
     log.info("Confluence ingestion (incremental sync) completed successfully.")
 
@@ -406,15 +487,12 @@ def run_job():
     Main entrypoint function for Cloud Run Job.
     Reads environment variables, parses data, then calls process_confluence_requests().
     """
-    # Example: we expect your "DATA_SOURCE_CONFIG" to be a JSON string in the environment.
-    # Adjust accordingly based on how you pass in arguments to the job.
     data_source_config = os.environ.get("DATA_SOURCE_CONFIG")
     if not data_source_config:
         log.error("DATA_SOURCE_CONFIG env var is missing.")
         sys.exit(1)
 
     try:
-        # If your config itself is nested JSON, parse accordingly:
         config = json.loads(data_source_config)
         event_data = json.loads(config.get("event_data", "{}"))
         log.info(f"Cloud Run Job: parsed event_data: {event_data}")
@@ -427,7 +505,7 @@ def run_job():
     confluence_user = event_data.get("confluenceUser")
     confluence_token = event_data.get("confluenceToken")
     parent_page_id = event_data.get("confluenceParent")
-    last_sync_time = event_data.get("lastSyncTime")
+    last_sync_time = event_data.get("lastSyncTime")  # Possibly a string
     project_id = event_data.get("projectId")
     data_source_id = event_data.get("id")
 
@@ -438,7 +516,6 @@ def run_job():
     project_details = psql.get_project_details(project_id=project_id)
     subscription_id = project_details.get("subscriptionId") if project_details else None
 
-    # Validate required fields
     required_fields = {
         "confluenceURL": confluence_url,
         "confluenceUser": confluence_user,
@@ -452,8 +529,11 @@ def run_job():
         log.error(f"Missing required fields: {missing}")
         sys.exit(1)
 
-    # Run your main ingestion
     try:
+        # Mark data source as processing
+        psql.update_data_source_by_id(data_source_id, status="processing")
+
+        # Run ingestion
         process_confluence_requests(
             confluence_url=confluence_url,
             confluence_user=confluence_user,
@@ -466,6 +546,9 @@ def run_job():
             embedding_model_name="text-multilingual-embedding-preview-0409",
             last_sync_time=last_sync_time
         )
+
+        # Mark data source as processed
+        psql.update_data_source_by_id(data_source_id, status="processed")
         log.info("Job completed successfully.")
     except Exception as e:
         log.exception("Error in process_confluence_requests:")

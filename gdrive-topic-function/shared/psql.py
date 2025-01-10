@@ -433,56 +433,5 @@ def get_data_source_details(data_source_id):
                 return data_source_details
 
     except Exception as e:
-        print(f"Error connecting to PostgreSQL or fetching files by data_source_id: {str(e)}")
-        sys.exit("Function execution failed.")
-
-def update_data_source_by_id(data_source_id, **kwargs):
-    """
-    Dynamically updates one or more columns in the DataSource table for the given data_source_id.
-    Provide any column_name=value pairs via kwargs.
-
-    Example:
-        update_data_source_by_id(
-            data_source_id="abc123",
-            status="processing"
-        )
-    """
-    if not data_source_id:
-        raise ValueError("Data source ID is required.")
-    if not kwargs:
-        print("No columns to update.")
-        return
-
-    columns = []
-    values = []
-    for col, val in kwargs.items():
-        columns.append(f'"{col}" = %s')
-        values.append(val)
-
-    set_clause = ", ".join(columns)
-    values.append(data_source_id)  # For the WHERE clause
-
-    query = f'UPDATE "DataSource" SET {set_clause} WHERE "id" = %s'
-
-    try:
-        with psycopg2.connect(**db_params) as connection:
-            with connection.cursor() as cursor:
-                connection.autocommit = False
-                lock_id = int(time.time() * 1000)
-                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
-
-                try:
-                    print(f"Updating DataSource {data_source_id} with: {kwargs}")
-                    cursor.execute(query, values)
-                    connection.commit()
-                    print("Transaction completed successfully.")
-                    return "success"
-
-                except Exception as e:
-                    connection.rollback()
-                    print(f"Error during DataSource update: {str(e)}")
-                    sys.exit("Function execution failed.")
-
-    except Exception as e:
-        print(f"Error connecting to PostgreSQL for DataSource update: {str(e)}")
+        print(f"Error connecting to PostgreSQLdetails of data_source_id: {str(e)}")
         sys.exit("Function execution failed.")

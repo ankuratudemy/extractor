@@ -28,6 +28,9 @@ locals {
   confluence_cpu                       = 1
   confluence_memory                    = "2Gi"
   confluence_port                      = 5000
+  gdrive_cpu                           = 1
+  gdrive_memory                        = "2Gi"
+  gdrive_port                          = 5000
   external_ip_address_name_fe          = "xtract-fe-ip-name"
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
@@ -35,7 +38,8 @@ locals {
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-261.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-15.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer-23.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-25.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -243,6 +247,12 @@ locals {
 
 resource "google_project_service" "compute_api" {
   service                    = "compute.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+resource "google_project_service" "drive_api" {
+  service                    = "drive.googleapis.com"
   disable_dependent_services = false
   disable_on_destroy         = false
 }
@@ -1587,36 +1597,311 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
   }
 
 
+# Google Drive
+# Create a Pub/Sub topic for Google drive Source
+resource "google_pubsub_topic" "gdrive_topic" {
+  name = "gdrive-topic-${local.environment}"
+}
 
-# resource "google_eventarc_trigger" "confluence_trigger" {
-#   for_each = toset(local.us_regions)
+resource "google_pubsub_topic" "gdrive_topic_dead_letter_topic" {
+  name                       = "gdrive-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
 
-#   name     = "confluence-trigger-${each.key}-${local.environment}"
-#   location = each.key  # or you can set `= each.key` if you want region-based triggers
 
-#   matching_criteria {
-#     attribute = "type"
-#     value     = "google.cloud.pubsub.topic.v1.messagePublished"
-#   }
+resource "google_cloud_run_v2_job" "gdrive_cloud_run_job" {
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
+  
+  # Name your job. You can tweak this however you like.
+  name               = "gdrive-job${local.indexer_domain_suffix}-${each.key}"
+  deletion_protection = false
+  location           = each.key
 
-#   # The transport block for Pub/Sub triggers
-#   transport {
-#     pubsub {
-#       topic = google_pubsub_topic.confluence_topic.id
-#     }
-#   }
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+      
+      containers {
+        # Remove the "ports" block entirely for a Cloud Run Job
+        image = local.gdrive_image
 
-#   service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+        # Pass environment variables/secrets into your container:
+        env {
+        name  = "SERVER_URL"
+        value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+      }
+       env {
+        name  = "UPLOADS_FOLDER"
+        value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+      }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+        env {
+          name = "GOOGLE_CLIENT_ID"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "GOOGLE_CLIENT_ID" : "GOOGLE_CLIENT_ID_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "GOOGLE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "GOOGLE_CLIENT_SECRET" : "GOOGLE_CLIENT_SECRET_STAGE"
+              version = "latest"
+            }
+          }
+        }
 
-#   destination {
-#     cloud_run_service {
-#       service = google_cloud_run_v2_service.confluence_cloud_run[each.key].name
-#       region  = each.key
-#     }
-#   }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
 
-#   depends_on = [
-#     google_pubsub_topic.confluence_topic,
-#     google_cloud_run_v2_service.confluence_cloud_run,
-#   ]
-# }
+        # Set resource limits
+        resources {
+          limits = {
+            cpu    = local.gdrive_cpu
+            memory = local.gdrive_memory
+          }
+        }
+      }
+
+      # Increase the timeout if you expect the job to run a while
+      timeout = "10800s" # 3 hours
+    }
+
+    # For one-off ingestion, usually parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+# Generates an archive of the source code compressed as a .zip file.
+data "archive_file" "gdrive_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../gdrive-topic-function"
+  output_path = "${path.module}/gdrive-topic-function.zip"
+}
+
+# Add source gdrive topic function code zip to the Cloud Function's bucket (Cloud_function_bucket) 
+resource "google_storage_bucket_object" "gdrive_zip" {
+  source       = "${path.module}/gdrive-topic-function.zip"
+  content_type = "application/zip"
+  name         = "gdrive-topic-function${local.fe_domain_suffix}-${data.archive_file.gdrive_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.gdrive_topic_function_bucket.name
+  depends_on = [
+    google_storage_bucket.gdrive_topic_function_bucket,
+    data.archive_file.gdrive_topic_function_source
+  ]
+}
+
+resource "google_storage_bucket" "gdrive_topic_function_bucket" {
+  name     = "gdrive-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+resource "google_cloud_run_service_iam_binding" "gdrive_function_cloud_run_iam_binding" {
+  project = google_cloudfunctions2_function.gdrive_trigger_function.project
+  location =  google_cloudfunctions2_function.gdrive_trigger_function.location
+  service  = google_cloudfunctions2_function.gdrive_trigger_function.name
+  role     = "roles/run.invoker"
+  members = [
+    "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
+  ]
+  depends_on = [ google_cloudfunctions2_function.gdrive_trigger_function ]
+
+   lifecycle {
+    replace_triggered_by = [ google_cloudfunctions2_function.gdrive_trigger_function ]
+  }
+}
+resource "google_cloudfunctions2_function" "gdrive_trigger_function" {
+  name     = "gdrive-topic-function-${local.environment}"
+  location = "us-central1"
+  event_trigger {
+    event_type   = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic = google_pubsub_topic.gdrive_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_gdrive_job"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.gdrive_topic_function_bucket.name
+        object = "gdrive-topic-function${local.fe_domain_suffix}-${data.archive_file.gdrive_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 20
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.gdrive_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID = local.project_id
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+  depends_on = [
+    google_pubsub_topic.gdrive_topic,
+    google_pubsub_topic.gdrive_topic_dead_letter_topic,
+    google_cloud_run_v2_job.gdrive_cloud_run_job
+  ]
+  }
+
