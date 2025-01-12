@@ -57,10 +57,13 @@ def pubsub_to_postgresql(event, context):
     # Extract data from the event
     subscription_id = data.get('subscription_id')
     user_id = data.get('user_id')
+    data_source_id = data.get('data_source_id')
     project_id = data.get('project_id')
     credits_used = data.get('creditsUsed')
 
-    if not subscription_id or not user_id or not project_id or not credits_used:
+    # Check if subscription_id, project_id, or credits_used are missing,
+    # or if both data_source_id and user_id are missing
+    if not subscription_id or not project_id or not credits_used or (not data_source_id and not user_id):
         print("Missing required data in the event.")
         return
 
@@ -77,8 +80,8 @@ def pubsub_to_postgresql(event, context):
 
                     # Insert into CreditUsage table
                     cursor.execute(
-                        'INSERT INTO "CreditUsage" ("id","creditsUsed", "timestamp", "subscriptionId", "projectId", "userId") VALUES (%s, %s, NOW(), %s, %s, %s)',
-                        (str(uuid.uuid4()),credits_used, subscription_id, project_id, user_id)
+                        'INSERT INTO "CreditUsage" ("id","creditsUsed", "timestamp", "subscriptionId", "projectId", "userId", "dataSourceId") VALUES (%s, %s, NOW(), %s, %s, %s, %s)',
+                        (str(uuid.uuid4()),credits_used, subscription_id, project_id, user_id, data_source_id)
                     )
 
                     # Update Subscription table (subtract creditsUsed from remainingCredits)
@@ -106,10 +109,11 @@ def pubsub_to_postgresql(event, context):
                         raise Exception(f"Project ID {project_id} not found.")
 
                     # Optional: Update User table (e.g., update lastActiveTimestamp)
-                    cursor.execute(
-                        'UPDATE "User" SET "lastActiveTimestamp" = NOW() WHERE "id" = %s',
-                        (user_id,)
-                    )
+                    if user_id:
+                        cursor.execute(
+                            'UPDATE "User" SET "lastActiveTimestamp" = NOW() WHERE "id" = %s',
+                            (user_id,)
+                        )
 
                     # Commit the transaction if all queries succeed
                     connection.commit()
