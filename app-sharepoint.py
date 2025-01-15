@@ -57,7 +57,6 @@ index = pc.Index(PINECONE_INDEX_NAME)
 # HELPER FUNCTIONS
 # ----------------------------------------------------------------------------
 
-
 def ensure_timezone_aware(dt: datetime) -> datetime:
     """
     Ensures that the datetime object is timezone-aware.
@@ -84,8 +83,7 @@ def generate_md5_hash(*args) -> str:
     """
     serialized_args = [json.dumps(arg) for arg in args]
     combined_string = "|".join(serialized_args)
-    md5_hash = hashlib.md5(combined_string.encode("utf-8")).hexdigest()
-    return md5_hash
+    return hashlib.md5(combined_string.encode("utf-8")).hexdigest()
 
 
 def computeNextSyncTime(from_date: datetime, sync_option: str = None) -> datetime:
@@ -97,7 +95,7 @@ def computeNextSyncTime(from_date: datetime, sync_option: str = None) -> datetim
     if not isinstance(from_date, datetime):
         from_date = datetime.now(CENTRAL_TZ)
 
-    if sync_option is None:
+    if not sync_option:
         sync_option = "hourly"
 
     if sync_option == "hourly":
@@ -180,89 +178,161 @@ def always_refresh_sharepoint_token(ds: Dict) -> Dict:
         return ds
 
 
-def _list_all_sharepoint_files_recursive(token: str, site_id: str, list_or_folder_id: str, is_list: bool) -> List[dict]:
+# ----------------------------------------------------------------------------
+# FALLBACK LIST LOGIC
+# ----------------------------------------------------------------------------
+def _list_site_based(token: str, site_id: str, folder_id: str) -> List[dict]:
     """
-    Recursively list all files in SharePoint using MS Graph API.
-    If is_list is True, list items from a SharePoint list.
-    If is_list is False, list files from a SharePoint folder.
+    Uses /sites/{siteId}/drive/items/{folder_id}/children to list items.
+    This approach works if 'folder_id' is actually an item in the default
+    doc library for the given site. If it fails, we fallback.
     """
-    results = []
-    stack = [list_or_folder_id]
-    base_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/"
+    base_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{folder_id}/children?$top=200"
     headers = {"Authorization": f"Bearer {token}"}
 
+    results = []
+    stack = [base_url]
     while stack:
-        current_id = stack.pop()
-        if is_list:
-            # For SharePoint lists
-            page_url = f"{base_url}lists/{current_id}/items?$expand=fields"
-        else:
-            # For SharePoint folders
-            page_url = f"{base_url}drive/items/{current_id}/children?$top=200"
-
-        while page_url:
-            log.debug(f"[_list_all_sharepoint_files_recursive] Fetching => {page_url}")
-            resp = requests.get(page_url, headers=headers)
-            if not resp.ok:
-                log.error(f"[_list_all_sharepoint_files_recursive] List failed => {resp.status_code} - {resp.text[:500]}")
-                if resp.status_code == 401:
-                    raise ValueError("401 Unauthorized - Will attempt token refresh")
-                resp.raise_for_status()
-
-            data = resp.json()
-            items = data.get("value", [])
-            for item in items:
-                if is_list:
-                    # SharePoint list items have a different structure
-                    # You may need to adjust based on your list schema
-                    fields = item.get("fields", {})
-                    # Assuming there's a field that links to files, adjust as needed
-                    file_url = fields.get("FileRef")  # Example field
-                    if file_url:
-                        # Extract file_id from file_url or use appropriate API
-                        # This is a placeholder; actual implementation may vary
-                        file_id = extract_file_id_from_url(file_url)
-                        if file_id:
-                            results.append({"id": file_id, "name": fields.get("Title", "untitled"), "file": {"mimeType": "application/octet-stream"}})
-                else:
-                    # SharePoint drive items
-                    if "folder" in item:
-                        # If it's a folder, add to stack for recursion
-                        stack.append(item["id"])
-                    results.append(item)
-
-            page_url = data.get("@odata.nextLink")
-
+        url = stack.pop()
+        log.debug(f"[_list_site_based] GET => {url}")
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()  # might raise HTTPError(400)
+        data = resp.json()
+        items = data.get("value", [])
+        for item in items:
+            # If it's a folder, push to stack
+            if "folder" in item:
+                folder_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{item['id']}/children?$top=200"
+                stack.append(folder_url)
+            results.append(item)
+        if "@odata.nextLink" in data:
+            stack.append(data["@odata.nextLink"])
     return results
 
 
-def list_all_sharepoint_files_recursively_with_retry(access_token: str, site_id: str, list_or_folder_id: str, is_list: bool) -> List[dict]:
+def _list_drive_based(token: str, drive_id: str, folder_id: Optional[str] = None) -> List[dict]:
     """
-    Recursively lists files (including subfolders) in the given SharePoint list or folder.
+    Uses /drives/{driveId}/items/{folderId or root}/children to list items.
+    If folder_id is None, defaults to 'root'.
     """
-    log.debug("[list_all_sharepoint_files_recursively_with_retry] Starting.")
-    try:
-        sharepoint_files = _list_all_sharepoint_files_recursive(access_token, site_id, list_or_folder_id, is_list)
-        return sharepoint_files
-    except Exception as e:
-        log.error(f"Failed to list SharePoint files => {e}")
-        raise
-
-
-def download_sharepoint_file_content(token: str, item_id: str, site_id: str) -> bytes:
-    """
-    Downloads the SharePoint file contents via the Graph API.
-    """
+    if not folder_id:
+        folder_id = "root"
+    base_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children?$top=200"
     headers = {"Authorization": f"Bearer {token}"}
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{item_id}/content"
 
-    resp = requests.get(url, headers=headers, stream=True)
-    if not resp.ok:
-        log.error(f"[download_sharepoint_file_content] Could not download => {resp.status_code} - {resp.text[:300]}")
+    results = []
+    stack = [base_url]
+    while stack:
+        url = stack.pop()
+        log.debug(f"[_list_drive_based] GET => {url}")
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()  # might raise HTTPError(400)
+        data = resp.json()
+        items = data.get("value", [])
+        for item in items:
+            if "folder" in item:
+                sub_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item['id']}/children?$top=200"
+                stack.append(sub_url)
+            results.append(item)
+        if "@odata.nextLink" in data:
+            stack.append(data["@odata.nextLink"])
+    return results
+
+
+def _list_spo_list_items(token: str, site_id: str, list_id: str) -> List[dict]:
+    """
+    If it's truly a SharePoint List, uses /sites/{siteId}/lists/{listId}/items?$expand=fields
+    to list items. No fallback needed for 'lists' if you are sure it's a list.
+    """
+    base_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items?$expand=fields"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    results = []
+    next_url = base_url
+    while next_url:
+        log.debug(f"[_list_spo_list_items] GET => {next_url}")
+        resp = requests.get(next_url, headers=headers)
         resp.raise_for_status()
+        data = resp.json()
+        items = data.get("value", [])
+        results.extend(items)
+        next_url = data.get("@odata.nextLink")
+    return results
 
+
+def list_all_sharepoint_files_fallback(token: str, site_id: str, list_or_folder_id: str, is_list: bool) -> List[dict]:
+    """
+    If is_list is True, we call the normal SharePoint list items endpoint.
+    Otherwise, we first try the site-based approach: /sites/{siteId}/drive/items/{folderId}/children.
+    If that fails with a 400 or 404, we fallback to drive-based approach: /drives/{list_or_folder_id}/items/root/children.
+    """
+    log.debug("[list_all_sharepoint_files_fallback] Starting.")
+    if is_list:
+        # It's a real SharePoint list => just use the list endpoint
+        return _list_spo_list_items(token, site_id, list_or_folder_id)
+
+    # Not a list => let's try site-based approach first
+    try:
+        log.info("[list_all_sharepoint_files_fallback] Trying site-based approach...")
+        return _list_site_based(token, site_id, list_or_folder_id)
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        if status_code in (400, 404):
+            # fallback
+            log.warning("[list_all_sharepoint_files_fallback] Site-based approach failed. Trying drive-based approach...")
+            # In a drive-based approach, 'list_or_folder_id' is typically the 'driveId'
+            # We'll assume we want to list 'root' or 'folder' items from that drive
+            return _list_drive_based(token, list_or_folder_id, None)
+        else:
+            raise e  # re-raise if not a typical fallback scenario
+
+
+# ----------------------------------------------------------------------------
+# FALLBACK DOWNLOAD LOGIC
+# ----------------------------------------------------------------------------
+def _download_site_based(token: str, site_id: str, item_id: str) -> bytes:
+    """
+    Site-based: GET /sites/{siteId}/drive/items/{itemId}/content
+    """
+    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{item_id}/content"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(url, headers=headers, stream=True)
+    resp.raise_for_status()
     return resp.content
 
+
+def _download_drive_based(token: str, drive_id: str, item_id: str) -> bytes:
+    """
+    Drive-based: GET /drives/{driveId}/items/{item_id}/content
+    """
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(url, headers=headers, stream=True)
+    resp.raise_for_status()
+    return resp.content
+
+
+def download_file_with_fallback(token: str, site_id: str, item_id: str, maybe_drive_id: str) -> bytes:
+    """
+    Tries site-based approach first. If that fails with 400/404, fallback to drive-based approach.
+    'maybe_drive_id' can be your 'list_or_folder_id' if it's actually a drive ID.
+    """
+    # First try site-based
+    try:
+        log.info("[download_file_with_fallback] Trying site-based download first...")
+        return _download_site_based(token, site_id, item_id)
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        if status_code in (400, 404):
+            log.warning("[download_file_with_fallback] Site-based download failed => fallback to drive-based.")
+            return _download_drive_based(token, maybe_drive_id, item_id)
+        else:
+            raise e
+
+
+# ----------------------------------------------------------------------------
+# OTHER PROCESSING LOGIC (Tika, Pinecone, etc.)
+# ----------------------------------------------------------------------------
 
 def convert_to_pdf(file_path: str, file_extension: str) -> Optional[bytes]:
     """
@@ -468,7 +538,7 @@ async def process_embedding_batch(
             "text": text,
             "source": filename,
             "page": page_num,
-            "sourceType": "sharePoint",
+            "sourceType": "sharepoint",
             "dataSourceId": data_source_id,
             "fileId": file_id,
             "lastModified": (
@@ -494,17 +564,9 @@ async def get_sharepoint_embedding(
     return [emb.values for emb in embeddings_list]
 
 
-def extract_file_id_from_url(file_url: str) -> Optional[str]:
-    """
-    Extracts the file ID from a SharePoint file URL.
-    This function needs to be implemented based on your SharePoint URL structure.
-    """
-    # Placeholder implementation
-    # Example SharePoint URL: https://yourdomain.sharepoint.com/sites/yoursite/Shared%20Documents/filename.ext
-    # SharePoint file IDs are usually unique GUIDs or encoded paths
-    # You may need to fetch the file ID via Microsoft Graph based on the URL
-    return None  # Implement accordingly
-
+# ----------------------------------------------------------------------------
+# MAIN RUN FUNCTION
+# ----------------------------------------------------------------------------
 
 def run_job():
     """
@@ -536,12 +598,12 @@ def run_job():
             psql.update_data_source_by_id(data_source_id, status="error")
             sys.exit("Data source not found.")
 
-        if ds.get("sourceType") != "sharePoint":
-            log.error(f"DataSource {data_source_id} is {ds.get('sourceType')}, not sharePoint.")
+        if ds.get("sourceType") != "sharepoint":
+            log.error(f"DataSource {data_source_id} is {ds.get('sourceType')}, not valid.")
             psql.update_data_source_by_id(data_source_id, status="error")
             sys.exit("Invalid data source type.")
 
-        # 1) Always refresh the SharePoint token, ignoring any existing expiresAt.
+        # 1) Always refresh the SharePoint token
         ds = always_refresh_sharepoint_token(ds)
         access_token = ds.get("sharePointAccessToken")
         if not access_token:
@@ -550,19 +612,20 @@ def run_job():
             sys.exit("No valid sharePointAccessToken after refresh.")
 
         site_id = ds.get("sharePointSiteId")
-        list_or_folder_id = ds.get("sharePointListId") or ds.get("sharePointFolderId")
-        is_list = bool(ds.get("sharePointListId"))
+        list_id = ds.get("sharePointListId")
+        folder_id = ds.get("sharePointFolderId")
 
         if not site_id:
             log.error("No sharePointSiteId in DS record.")
             psql.update_data_source_by_id(data_source_id, status="error")
             sys.exit("No sharePointSiteId in DS record.")
 
-        if not list_or_folder_id:
+        if not (list_id or folder_id):
             log.error("No sharePointListId or sharePointFolderId in DS record.")
             psql.update_data_source_by_id(data_source_id, status="error")
             sys.exit("No sharePointListId or sharePointFolderId in DS record.")
 
+        # If ds has an explicit lastSyncTime
         if ds.get("lastSyncTime"):
             last_sync_time = ds["lastSyncTime"]
 
@@ -576,18 +639,22 @@ def run_job():
                 log.error(f"Invalid last_sync_time format: {last_sync_time}, error: {e}")
                 last_sync_dt = None
 
-        # 2) List files from SharePoint
+        # 2) List files using our fallback approach
+        is_list = bool(list_id)
+        list_or_folder_id = list_id if is_list else folder_id
+
         try:
-            sharepoint_files = list_all_sharepoint_files_recursively_with_retry(
+            sharepoint_files = list_all_sharepoint_files_fallback(
                 access_token, site_id, list_or_folder_id, is_list
             )
         except Exception as e:
-            log.exception("Failed listing files from SharePoint even after token refresh:")
+            log.exception("Failed listing files from SharePoint (both approaches):")
             psql.update_data_source_by_id(data_source_id, status="error")
             sys.exit("Failed listing files from SharePoint.")
 
         log.info(f"Found {len(sharepoint_files)} total items in {'list' if is_list else 'folder'} {list_or_folder_id}.")
 
+        # 3) Identify new/updated/removed
         existing_files = psql.fetch_files_by_data_source_id(data_source_id)
         db_file_keys = set(ef["id"] for ef in existing_files)
 
@@ -605,17 +672,15 @@ def run_job():
         sharepoint_file_keys = set()
 
         for item in sharepoint_files:
-            item_id = item["id"]
+            item_id = item["id"]     # file/folder item ID
             item_name = item.get("name", "untitled")
-            item_file = item.get("file")
             item_folder = item.get("folder")
-            item_modified_time = item.get("lastModifiedDateTime")  # e.g., "2023-09-01T12:03:43Z"
+            item_modified_time = item.get("lastModifiedDateTime")
 
+            # Skip folders since we added them to stack
             if item_folder:
-                # Skip folders as we've already recursed into them
                 continue
 
-            # Generate unique file key
             file_key = generate_md5_hash(sub_for_hash, project_id, item_id)
             sharepointFileId_to_key[item_id] = file_key
             sharepoint_file_keys.add(file_key)
@@ -624,7 +689,7 @@ def run_job():
             if file_key not in db_file_keys:
                 new_files.append(item)
             else:
-                if last_sync_dt:
+                if last_sync_dt and item_modified_time:
                     try:
                         item_modified_dt = ensure_timezone_aware(parser.isoparse(item_modified_time))
                     except Exception:
@@ -666,31 +731,22 @@ def run_job():
             )
             sys.exit("SERVER_URL is not set.")
 
-        # Obtain bearer token or set appropriate headers
-        # Adjust this part based on your authentication requirements
-        # For example, if Tika server requires a specific token:
-        # bearer_token = get_bearer_token_somehow()
-        # headers = {
-        #     "Authorization": f"Bearer {bearer_token}",
-        #     "X-Tika-PDFOcrStrategy": "auto",
-        #     "Accept": "text/plain",
-        # }
         headers = {
-            "Authorization": f"Bearer some_token_or_internal_auth",  # Replace accordingly
             "X-Tika-PDFOcrStrategy": "auto",
             "Accept": "text/plain",
         }
 
         loop = get_event_loop()
 
+        # 4) Process each file
         db_file_keys_list = set(db_file_keys)
         for sp_item in to_process:
             item_id = sp_item["id"]
             item_name = sp_item.get("name", "untitled")
-            item_modified_time = sp_item.get("lastModifiedDateTime")
             file_key = sharepointFileId_to_key[item_id]
-
             now_dt = datetime.now(CENTRAL_TZ)
+
+            # Add or update DB row
             if file_key not in db_file_keys_list:
                 psql.add_new_file(
                     file_id=file_key,
@@ -702,7 +758,7 @@ def run_job():
                     file_key=f"{sub_for_hash}-{project_id}-{file_key}",
                     page_count=0,
                     upload_url="None",
-                    source_type="sharePoint",
+                    source_type="sharepoint",
                     data_source_id=data_source_id,
                     project_id=project_id,
                 )
@@ -710,11 +766,11 @@ def run_job():
             else:
                 psql.update_file_by_id(file_key, status="processing", updatedAt=now_dt.isoformat())
 
-            # 3) Download the file content from SharePoint
+            # Download file with fallback:
             try:
-                content_bytes = download_sharepoint_file_content(access_token, item_id, site_id)
+                content_bytes = download_file_with_fallback(access_token, site_id, item_id, list_or_folder_id)
             except Exception as e:
-                log.exception(f"Failed to download {item_name} from SharePoint:")
+                log.exception(f"Failed to download {item_name} from SharePoint (both approaches):")
                 psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
                 continue
 
@@ -723,13 +779,12 @@ def run_job():
                 psql.update_file_by_id(file_key, status="not supported", updatedAt=now_dt.isoformat())
                 continue
 
-            # Attempt to determine file extension based on SharePoint data or infer from name
-            # For simplicity, infer from filename
+            # Decide file extension
             filename_parts = item_name.split(".")
             if len(filename_parts) > 1:
                 ext = filename_parts[-1].lower()
             else:
-                ext = "pdf"  # Default to PDF if extension is missing
+                ext = "pdf"  # default
 
             temp_file_path = os.path.join(UPLOADS_FOLDER, f"{file_key}.{ext}")
             try:
@@ -740,36 +795,32 @@ def run_job():
                 psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
                 continue
 
-            def process_local_file(temp_path: str, file_extension: str) -> Tuple[List[Tuple[str, int]], int]:
-                """
-                Processes the local file: converts to PDF if necessary and splits into pages.
-                """
-                if file_extension == "pdf":
-                    with open(temp_path, "rb") as f_in:
+            # Convert & split
+            def process_local_file(path_: str, file_ext: str) -> Tuple[List[Tuple[str, io.BytesIO]], int]:
+                if file_ext == "pdf":
+                    with open(path_, "rb") as f_in:
                         pdf_data = f_in.read()
                     return file_processor.split_pdf(pdf_data)
-                elif file_extension in ["docx", "xlsx", "pptx", "odt", "odp", "ods"]:
-                    pdf_data = convert_to_pdf(temp_path, file_extension)
+                elif file_ext in ["docx", "xlsx", "pptx", "odt", "odp", "ods"]:
+                    pdf_data = convert_to_pdf(path_, file_ext)
                     if pdf_data:
                         return file_processor.split_pdf(pdf_data)
                     else:
-                        raise ValueError("Conversion to PDF failed")
-                elif file_extension in ["csv", "tsv"]:
-                    # Example handling for CSV/TSV; adjust as needed
-                    with open(temp_path, "rb") as f_in:
+                        raise ValueError("Conversion to PDF failed.")
+                elif file_ext in ["csv", "tsv"]:
+                    with open(path_, "rb") as f_in:
                         csv_data = f_in.read()
                     return file_processor.split_csv(csv_data)
-                elif file_extension in ["eml", "msg", "pst", "ost", "mbox", "dbx", "dat", "emlx"]:
-                    with open(temp_path, "rb") as f_in:
+                elif file_ext in ["eml", "msg", "pst", "ost", "mbox", "dbx", "dat", "emlx"]:
+                    with open(path_, "rb") as f_in:
                         email_data = f_in.read()
                     return ([("1", io.BytesIO(email_data))], 1)
-                elif file_extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
-                    with open(temp_path, "rb") as f_in:
+                elif file_ext in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
+                    with open(path_, "rb") as f_in:
                         image_data = f_in.read()
                     return ([("1", io.BytesIO(image_data))], 1)
                 else:
-                    # Unsupported file format
-                    raise ValueError("Unsupported file format in SharePoint ingestion logic")
+                    raise ValueError(f"Unsupported file format: {file_ext}")
 
             try:
                 final_pages, final_num_pages = process_local_file(temp_file_path, ext.lower())
@@ -783,14 +834,15 @@ def run_job():
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
 
+            # Send pages to Tika & embed
             try:
                 results = loop.run_until_complete(
                     process_pages_async(
                         final_pages,
                         headers,
                         item_name,
-                        project_id,
-                        file_key,
+                        project_id,  # namespace
+                        file_key,    # file_id
                         data_source_id,
                         last_modified=now_dt,
                     )

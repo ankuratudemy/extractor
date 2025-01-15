@@ -31,9 +31,12 @@ locals {
   gdrive_cpu                           = 1
   gdrive_memory                        = "2Gi"
   gdrive_port                          = 5000
-  onedrive_cpu                           = 1
-  onedrive_memory                        = "2Gi"
-  onedrive_port                          = 5000
+  onedrive_cpu                         = 1
+  onedrive_memory                      = "2Gi"
+  onedrive_port                        = 5000
+  sharepoint_cpu                       = 1
+  sharepoint_memory                    = "2Gi"
+  sharepoint_port                      = 5000
   external_ip_address_name_fe          = "xtract-fe-ip-name"
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
@@ -44,6 +47,7 @@ locals {
   gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer-23.0.0"
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-25.0.0"
   onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer-5.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-6.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -2045,3 +2049,308 @@ resource "google_pubsub_subscription" "onedrive_dead_letter_subscription" {
   name  = "onedrive_dead_letter_subscription${local.fe_domain_suffix}"
   topic = google_pubsub_topic.onedrive_topic_dead_letter_topic.name
 }
+
+#### SHAREPOINT
+
+resource "google_pubsub_topic" "sharepoint_topic" {
+  name = "sharepoint-topic-${local.environment}"
+}
+
+
+resource "google_pubsub_topic" "sharepoint_topic_dead_letter_topic" {
+  name                       = "sharepoint-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s" # ~31 days, adjust as needed
+}
+
+
+resource "google_cloud_run_v2_job" "sharepoint_cloud_run_job" {
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
+  
+  name                 = "sharepoint-job${local.indexer_domain_suffix}-${each.key}"
+  deletion_protection  = false
+  location             = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+      
+      containers {
+        # NOTE: No ports for a Cloud Run Job container
+        image = local.sharepoint_image  
+
+        # Environment variables / secrets
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        # Insert your SharePoint-specific secrets or config here:
+        env {
+          name = "SHAREPOINT_CLIENT_ID"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SHAREPOINT_CLIENT_ID" : "SHAREPOINT_CLIENT_ID_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SHAREPOINT_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SHAREPOINT_CLIENT_SECRET" : "SHAREPOINT_CLIENT_SECRET_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = local.sharepoint_cpu    # Define local.sharepoint_cpu accordingly
+            memory = local.sharepoint_memory # Define local.sharepoint_memory accordingly
+          }
+        }
+      }
+
+      # Adjust the Job timeout as needed for your SharePoint ingestion tasks
+      timeout = "10800s" # 3 hours
+    }
+
+    # For a one-off ingestion, typically parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+data "archive_file" "sharepoint_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../sharepoint-topic-function" # Adjust the path as necessary
+  output_path = "${path.module}/sharepoint-topic-function.zip"
+}
+
+resource "google_storage_bucket" "sharepoint_topic_function_bucket" {
+  name     = "sharepoint-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "sharepoint_zip" {
+  source       = "${path.module}/sharepoint-topic-function.zip"
+  content_type = "application/zip"
+  name         = "sharepoint-topic-function${local.fe_domain_suffix}-${data.archive_file.sharepoint_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.sharepoint_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.sharepoint_topic_function_bucket,
+    data.archive_file.sharepoint_topic_function_source
+  ]
+}
+
+
+resource "google_cloudfunctions2_function" "sharepoint_trigger_function" {
+  name     = "sharepoint-topic-function-${local.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type    = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic  = google_pubsub_topic.sharepoint_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_sharepoint_job" # Adjust to match your Python function name
+    source {
+      storage_source {
+        bucket = google_storage_bucket.sharepoint_topic_function_bucket.name
+        object = "sharepoint-topic-function${local.fe_domain_suffix}-${data.archive_file.sharepoint_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 20
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      # The function typically needs to know the Cloud Run Job name/region it must invoke
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.sharepoint_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+
+    # If your function needs DB credentials or other secrets
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.sharepoint_topic,
+    google_pubsub_topic.sharepoint_topic_dead_letter_topic,
+    google_cloud_run_v2_job.sharepoint_cloud_run_job
+  ]
+}
+
+# Create a subscription to the dead-letter topic
+resource "google_pubsub_subscription" "sharepoint_dead_letter_subscription" {
+  name  = "sharepoint_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.sharepoint_topic_dead_letter_topic.name
+}
+

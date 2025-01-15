@@ -23,7 +23,7 @@ db_params = {
 # Google Cloud Function entry point
 
 
-def pubsub_to_cloud_run_onedrive_job(event, context):
+def pubsub_to_cloud_run_sharepoint_job(event, context):
     """
     Trigger a Cloud Run Job using data received from a Pub/Sub topic.
     """
