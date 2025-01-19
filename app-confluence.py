@@ -165,7 +165,8 @@ def process_confluence_requests(
         )
         log.info("Confluence client initialized.")
     except Exception as e:
-        log.exception("Failed to initialize Confluence client:")
+        log.error("Failed to initialize Confluence client:")
+        psql.update_data_source_by_id(data_source_id, status="processing")
         return
 
     # (3) Initialize text splitter
@@ -208,7 +209,7 @@ def process_confluence_requests(
         child_ids = get_all_child_ids(parent_page_id)
         log.info(f"Discovered child page IDs for {parent_page_id}: {child_ids}")
     except Exception as e:
-        log.exception("Failed to fetch child page IDs:")
+        log.error("Failed to fetch child page IDs:")
         return
     
     # Ensure the parent_page_id is included
@@ -276,14 +277,14 @@ def process_confluence_requests(
             index.delete(ids=[vector_id], namespace=namespace)
             log.info(f"Deleted Pinecone vector {vector_id}")
         except Exception as e:
-            log.exception(f"Error deleting vector {vector_id} from Pinecone:")
+            log.error(f"Error deleting vector {vector_id} from Pinecone:")
 
         # Step 2) Remove from PostgreSQL
         try:
             psql.delete_file_by_id(r_key)  # r_key = MD5-based ID
             log.info(f"Deleted DB File with ID={r_key}")
         except Exception as e:
-            log.exception(f"Error deleting DB file {r_key}:")
+            log.error(f"Error deleting DB file {r_key}:")
 
     # (D) Identify New and Updated Pages
     new_page_ids = []
@@ -324,7 +325,7 @@ def process_confluence_requests(
                     updated_page_ids.append(page_id)
 
             except Exception as e:
-                log.exception(f"Failed to retrieve page info for {page_id}, skipping:")
+                log.error(f"Failed to retrieve page info for {page_id}, skipping:")
                 continue
 
     log.info(f"Total new pages to process: {len(new_page_ids)}")
@@ -361,7 +362,7 @@ def process_confluence_requests(
             documents = loader.load()
             log.info(f"Loaded {len(documents)} documents from Confluence.")
         except Exception as e:
-            log.exception("Error loading documents from Confluence:")
+            log.error("Error loading documents from Confluence:")
             continue
 
         # (7a) Split into chunks
@@ -400,7 +401,8 @@ def process_confluence_requests(
                 )
                 log.info(f"Added new file record for file_id: {file_id}")
             except Exception as e:
-                log.exception(f"Failed to add new file record in psql for doc {page_id}:")
+                log.error(f"Failed to add new file record in psql for doc {page_id}:")
+                continue
 
             # Create embedding
             try:
@@ -409,7 +411,7 @@ def process_confluence_requests(
                 )
                 embedding = embedding_result[0]
             except Exception as e:
-                log.exception(f"Error creating embeddings for doc {page_id}:")
+                log.error(f"Error creating embeddings for doc {page_id}:")
                 continue
 
             # Prepare vector
@@ -463,11 +465,11 @@ def process_confluence_requests(
                                 GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message
                             )
                         except Exception as e:
-                            log.exception(f"Failed to update status for file_id {file_id_to_update}:")
+                            log.error(f"Failed to update status for file_id {file_id_to_update}:")
                     # **END: Update file status to 'processed'**
 
                 except Exception as e:
-                    log.exception("Error upserting to Pinecone:")
+                    log.error("Error upserting to Pinecone:")
                 finally:
                     pinecone_vectors.clear()
 
@@ -497,7 +499,7 @@ def run_job():
         event_data = json.loads(config.get("event_data", "{}"))
         log.info(f"Cloud Run Job: parsed event_data: {event_data}")
     except Exception as e:
-        log.exception("Failed to parse DATA_SOURCE_CONFIG:")
+        log.error("Failed to parse DATA_SOURCE_CONFIG:")
         sys.exit(1)
 
     # Extract parameters
@@ -551,7 +553,8 @@ def run_job():
         psql.update_data_source_by_id(data_source_id, status="processed")
         log.info("Job completed successfully.")
     except Exception as e:
-        log.exception("Error in process_confluence_requests:")
+        log.error("Error in process_confluence_requests:")
+        psql.update_data_source_by_id(data_source_id, status="failed")
         sys.exit(1)
 
 
