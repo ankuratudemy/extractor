@@ -1,0 +1,8 @@
+psycopg2-binary
+google-cloud-pubsub
+google-auth
+google-api-core
+redis
+google-cloud-run
+requests
+
