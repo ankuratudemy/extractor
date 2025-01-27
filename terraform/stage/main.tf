@@ -57,7 +57,7 @@ locals {
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-28.0.0"
   onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer-5.0.0"
   sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-6.0.0"
-  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-2.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-13.0.0"
   azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-2.0.0"
   gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-10.0.0"
   be_concurrent_requests_per_inst      = 1
@@ -2370,6 +2370,7 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
         image = local.s3_image # Docker image for your s3_ingest.py job
 
         # Example env vars
+
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
@@ -2385,6 +2386,14 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
         env {
           name  = "GCP_CREDIT_USAGE_TOPIC"
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
         }
         env {
           name  = "ENVIRONMENT"
@@ -2886,6 +2895,86 @@ resource "google_pubsub_subscription" "gcpbucket_dead_letter_subscription" {
   topic = google_pubsub_topic.gcpbucket_topic_dead_letter_topic.name
 }
 
+# BM25 vocab updater function:
+resource "google_pubsub_topic" "bm25_vocab_updater_topic" {
+  name = "bm25-vocab-updater-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "bm25_vocab_updater_topic_dead_letter_topic" {
+  name                       = "bm25-vocab-updater-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+data "archive_file" "bm25_vocab_updater_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../bm25-vocab-updater-function"
+  output_path = "${path.module}/bm25-vocab-updater-topic-function.zip"
+}
+
+resource "google_storage_bucket" "bm25_vocab_updater_topic_function_bucket" {
+  name     = "bm25-vocab-updater-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "bm25_vocab_updater_zip" {
+  source       = "${path.module}/bm25-vocab-updater-topic-function.zip"
+  content_type = "application/zip"
+  name         = "bm25-vocab-updater-topic-function${local.fe_domain_suffix}-${data.archive_file.bm25_vocab_updater_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.bm25_vocab_updater_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.bm25_vocab_updater_topic_function_bucket,
+    data.archive_file.bm25_vocab_updater_topic_function_source
+  ]
+}
+
+
+resource "google_cloudfunctions2_function" "bm25_vocab_updater" {
+  name     = "bm25-vocab-updater-${var.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.bm25_vocab_updater_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_bm25_vocab_updater"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.bm25_vocab_updater_topic_function_bucket.name
+        object = google_storage_bucket_object.bm25_vocab_updater_zip.name
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10
+    timeout_seconds                = 300
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      GCP_PROJECT_ID = local.project_id,
+      BM25_VOCAB_UPDATES_TOPIC = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+      FIRESTORE_DB = google_firestore_database.firestore.name
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.bm25_vocab_updater_topic,
+    google_storage_bucket_object.bm25_vocab_updater_zip,
+    google_firestore_database.firestore
+  ]
+}
+
+resource "google_pubsub_subscription" "bm25_vocab_updater_dead_letter_subscription" {
+  name  = "bm25_vocab_updater_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.bm25_vocab_updater_topic_dead_letter_topic.name
+}
 
 ############################
 # Azure Blob Pub/Sub Topics

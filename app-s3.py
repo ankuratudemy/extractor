@@ -31,10 +31,19 @@ from vertexai.preview.language_models import TextEmbeddingModel
 import boto3
 from botocore.config import Config
 
+# BM25 + sparse vector utilities (with no spaCy usage)
+from shared.bm25 import (
+    tokenize_document,
+    publish_partial_bm25_update,
+    compute_bm25_sparse_vector,
+    get_project_vocab_stats
+)
+
 # ----------------------------------------------------------------------------
 # ENV VARIABLES
 # ----------------------------------------------------------------------------
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+FIRESTORE_DB = os.environ.get("FIRESTORE_DB")
 GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
 UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # default
 
@@ -56,11 +65,34 @@ index = pc.Index(PINECONE_INDEX_NAME)
 # HELPER FUNCTIONS
 # ----------------------------------------------------------------------------
 
+def get_sparse_values(document_text: str, project_id: str):
+    """
+    Given a single text (string), compute a BM25-based sparse vector.
+    1) Tokenize the text
+    2) Publish partial update so aggregator can track df, N, etc.
+    3) Fetch the updated global stats from Firestore
+    4) Compute the BM25 sparse vector
+    """
+    # 1) Tokenize
+    tokens = tokenize_document(document_text)
+
+    # 2) Publish partial update => aggregator merges term freq
+    publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
+
+    # 3) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    vocab_stats = get_project_vocab_stats(project_id)
+
+    # 4) Compute local sparse vector
+    sparse_vector = compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=300)
+    return sparse_vector
+
+
 def ensure_timezone_aware(dt):
     """Ensures that the datetime object is timezone-aware (Central US Time by default)."""
     if dt and dt.tzinfo is None:
         return dt.replace(tzinfo=CENTRAL_TZ)
     return dt
+
 
 def get_event_loop():
     try:
@@ -69,6 +101,7 @@ def get_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop
+
 
 def generate_md5_hash(*args):
     """
@@ -79,6 +112,7 @@ def generate_md5_hash(*args):
     combined_string = "|".join(serialized_args)
     md5_hash = hashlib.md5(combined_string.encode("utf-8")).hexdigest()
     return md5_hash
+
 
 def compute_next_sync_time(from_date: datetime, sync_option: str = None) -> datetime:
     """
@@ -103,6 +137,7 @@ def compute_next_sync_time(from_date: datetime, sync_option: str = None) -> date
         # default
         return from_date + timedelta(hours=1)
 
+
 def remove_file_from_db_and_pinecone(file_id, ds_id, project_id, namespace):
     """
     Removes references in DB + Pinecone for the given file_id => consistent with your approach.
@@ -121,6 +156,7 @@ def remove_file_from_db_and_pinecone(file_id, ds_id, project_id, namespace):
         log.info(f"Removed DB File {file_id}")
     except Exception as e:
         log.exception(f"Error removing DB File {file_id}:")
+
 
 def convert_to_pdf(file_path, file_extension):
     """
@@ -153,6 +189,7 @@ def convert_to_pdf(file_path, file_extension):
         log.error(f"Error during PDF conversion: {str(e)}")
         return None
 
+
 async def _async_put_page(session, url, page_data, page_num, headers, max_retries=10):
     retries = 0
     while retries < max_retries:
@@ -179,6 +216,7 @@ async def _async_put_page(session, url, page_data, page_num, headers, max_retrie
 
     raise RuntimeError(f"Failed after {max_retries} tries for page {page_num}")
 
+
 async def process_pages_async(
     pages, headers, filename, namespace, file_id, data_source_id, last_modified
 ):
@@ -199,6 +237,7 @@ async def process_pages_async(
         results, filename, namespace, file_id, data_source_id, last_modified
     )
     return results
+
 
 def chunk_text(text, max_tokens=2048, overlap_chars=2000):
     enc = tiktoken.get_encoding("cl100k_base")
@@ -227,6 +266,7 @@ def chunk_text(text, max_tokens=2048, overlap_chars=2000):
         end = start + max_tokens
 
     return chunks
+
 
 async def create_and_upload_embeddings_in_batches(
     results, filename, namespace, file_id, data_source_id, last_modified
@@ -274,13 +314,22 @@ async def create_and_upload_embeddings_in_batches(
         )
         batch.clear()
 
+
 async def process_embedding_batch(
     batch, filename, namespace, file_id, data_source_id, last_modified
 ):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
+
+    # We'll compute the sparse vector **per chunk**:
+    # That means we handle each (chunk, embedding) pair individually, rather than
+    # combining them into a single "texts" argument (which caused the error).
     vectors = []
+
     for (text, page_num, chunk_idx), embedding in zip(batch, embeddings):
+        # For each chunk, compute its own sparse vector
+        sparse_values = get_sparse_values(text, namespace)
+
         doc_id = f"{data_source_id}#{file_id}#{page_num}#{chunk_idx}"
         metadata = {
             "text": text,
@@ -295,10 +344,16 @@ async def process_embedding_batch(
                 else str(last_modified)
             ),
         }
-        vectors.append({"id": doc_id, "values": embedding, "metadata": metadata})
+        vectors.append({
+            "id": doc_id,
+            "values": embedding,
+            "sparse_values": sparse_values,
+            "metadata": metadata
+        })
 
     log.info(f"Upserting {len(vectors)} vectors to Pinecone for file_id={file_id}")
     index.upsert(vectors=vectors, namespace=namespace)
+
 
 async def get_google_embedding(queries, model_name="text-multilingual-embedding-preview-0409"):
     """
@@ -307,6 +362,7 @@ async def get_google_embedding(queries, model_name="text-multilingual-embedding-
     model = TextEmbeddingModel.from_pretrained(model_name)
     embeddings_list = model.get_embeddings(texts=queries, auto_truncate=True)
     return [emb.values for emb in embeddings_list]
+
 
 # ----------------------------------------------------------------------------
 # S3 LISTING HELPERS
@@ -330,13 +386,11 @@ def get_s3_client(access_key, secret_key, region):
     )
     return session.client('s3', config=config)
 
+
 def list_s3_objects(s3_client, bucket_name, prefix=""):
     """
     Lists all objects in the given bucket under `prefix` (if provided).
     Returns a list of dict: { 'Key': ..., 'LastModified': ..., ... }
-    This only recurses if you want to handle subfolders manually. 
-    By default, S3 doesn't require recursion if the prefix is correct; 
-    you can just keep calling list_objects_v2 with a continuation token.
     """
     all_items = []
     continuation_token = None
@@ -361,11 +415,13 @@ def list_s3_objects(s3_client, bucket_name, prefix=""):
 
     return all_items
 
+
 def download_s3_object(s3_client, bucket_name, key, local_path):
     """
     Downloads the object from S3 to `local_path`.
     """
     s3_client.download_file(bucket_name, key, local_path)
+
 
 # ----------------------------------------------------------------------------
 # MAIN LOGIC
@@ -437,7 +493,6 @@ def run_job():
         existing_files = psql.fetch_files_by_data_source_id(data_source_id)
         db_file_keys = set(ef["id"] for ef in existing_files)
 
-        # We'll figure out new/updated vs removed
         sub_id = None
         if project_id:
             proj_details = psql.get_project_details(project_id)
@@ -458,7 +513,7 @@ def run_job():
             if not last_modified.tzinfo:
                 last_modified = last_modified.replace(tzinfo=CENTRAL_TZ)
 
-            # Build unique file_key using sub_for_hash + projectId + s3key
+            # Build unique file_key
             file_key = generate_md5_hash(sub_for_hash, project_id, s3key)
             s3_key_to_md5[s3key] = file_key
             s3_file_keys.add(file_key)
@@ -547,7 +602,6 @@ def run_job():
                 psql.update_file_by_id(file_key, status="processing", updatedAt=now_dt.isoformat())
 
             # Download object
-            # We'll guess extension from s3key or from your own logic
             extension = "pdf"
             if "." in s3key:
                 extension = s3key.rsplit(".", 1)[-1].lower()
@@ -572,7 +626,6 @@ def run_job():
                         return file_processor.split_pdf(pdf_data)
                     else:
                         raise ValueError("Conversion to PDF failed for S3 file.")
-                # else handle images, CSV, etc...
                 raise ValueError("Unsupported file format in S3 ingestion logic")
 
             base_name = os.path.basename(s3key)
@@ -644,9 +697,11 @@ def run_job():
         psql.update_data_source_by_id(data_source_id, status="error")
         return (str(e), 500)
 
+
 def shutdown_handler(sig, frame):
     log.info(f"Caught signal {signal.strsignal(sig)}. Exiting.")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     if not os.path.exists(UPLOADS_FOLDER):
