@@ -31,12 +31,23 @@ from vertexai.preview.language_models import TextEmbeddingModel
 from azure.storage.blob import BlobServiceClient, ContainerClient
 from azure.core.exceptions import ResourceNotFoundError
 
-CENTRAL_TZ = ZoneInfo("America/Chicago")
+# BM25 + sparse vector utilities (with no spaCy usage)
+from shared.bm25 import (
+    tokenize_document,
+    publish_partial_bm25_update,
+    compute_bm25_sparse_vector,
+    get_project_vocab_stats
+)
 
+# ----------------------------------------------------------------------------
+# ENV VARIABLES
+# ----------------------------------------------------------------------------
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+FIRESTORE_DB = os.environ.get("FIRESTORE_DB")
 GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
-UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")
+UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # default
 
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 SERVER_DOMAIN = os.environ.get("SERVER_URL")
 SERVER_URL = f"https://{SERVER_DOMAIN}/tika" if SERVER_DOMAIN else None
 
@@ -45,6 +56,27 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME")
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
+
+def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
+    """
+    - Combine all file text into one big string.
+    - Publish partial update once so aggregator merges the entire file's token freq.
+    - Fetch and return the updated vocab stats from Firestore.
+    """
+    # 1) Combine
+    combined_text = " ".join(file_texts)
+
+    # 2) Tokenize
+    tokens = tokenize_document(combined_text)
+
+    # 3) Publish partial update => aggregator merges term freq
+    publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
+
+    # 4) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    vocab_stats = get_project_vocab_stats(project_id)
+
+    return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
+
 
 def ensure_timezone_aware(dt):
     if dt and dt.tzinfo is None:
@@ -203,7 +235,10 @@ async def create_and_upload_embeddings_in_batches(
     max_batch_texts = 250
     max_batch_tokens = 14000
     enc = tiktoken.get_encoding("cl100k_base")
-
+    # 1) # ADDED for single-file BM25 update
+    all_file_texts = [text for (text, _page_num) in results if text.strip()]
+    # Update aggregator once, then retrieve vocab_stats
+    sparse_values = get_sparse_vector(all_file_texts, namespace, 300)
     for text, page_num in results:
         if not text.strip():
             continue
@@ -215,7 +250,7 @@ async def create_and_upload_embeddings_in_batches(
             ):
                 if batch:
                     await process_embedding_batch(
-                        batch, filename, namespace, file_id, data_source_id, last_modified
+                        batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
                     )
                     batch.clear()
                     batch_text_count = 0
@@ -233,11 +268,11 @@ async def create_and_upload_embeddings_in_batches(
 
     if batch:
         await process_embedding_batch(
-            batch, filename, namespace, file_id, data_source_id, last_modified
+            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
         )
         batch.clear()
 
-async def process_embedding_batch(batch, filename, namespace, file_id, data_source_id, last_modified):
+async def process_embedding_batch(batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
     vectors = []
@@ -256,7 +291,7 @@ async def process_embedding_batch(batch, filename, namespace, file_id, data_sour
                 else str(last_modified)
             ),
         }
-        vectors.append({"id": doc_id, "values": embedding, "metadata": metadata})
+        vectors.append({"id": doc_id, "values": embedding,"sparse_values": sparse_values, "metadata": metadata})
 
     log.info(f"Upserting {len(vectors)} vectors to Pinecone for file_id={file_id}")
     index.upsert(vectors=vectors, namespace=namespace)
@@ -346,7 +381,7 @@ def run_job():
             if not last_modified.tzinfo:
                 last_modified = last_modified.replace(tzinfo=CENTRAL_TZ)
 
-            file_key = generate_md5_hash(sub_for_hash, project_id, blob_name)
+            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, blob_name)
             azure_file_keys.add(file_key)
 
             if file_key not in db_file_keys:
@@ -400,7 +435,7 @@ def run_job():
         db_file_keys_list = set(db_file_keys)
 
         for (blob, blob_name, last_modified) in to_process:
-            file_key = generate_md5_hash(sub_for_hash, project_id, blob_name)
+            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, blob_name)
             now_dt = datetime.now(CENTRAL_TZ)
             base_name = os.path.basename(blob_name)
 

@@ -38,4 +38,5 @@ tiktoken
 google-genai
 typing-extensions
 pydantic
+google-cloud-firestore
 

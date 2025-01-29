@@ -29,12 +29,21 @@ from pinecone.grpc import PineconeGRPC as Pinecone
 # If using Vertex AI for embeddings
 from vertexai.preview.language_models import TextEmbeddingModel
 
+# BM25 + sparse vector utilities (with no spaCy usage)
+from shared.bm25 import (
+    tokenize_document,
+    publish_partial_bm25_update,
+    compute_bm25_sparse_vector,
+    get_project_vocab_stats
+)
+
 # ----------------------------------------------------------------------------
 # ENV VARIABLES
 # ----------------------------------------------------------------------------
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+FIRESTORE_DB = os.environ.get("FIRESTORE_DB")
 GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
-UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # Default to /tmp/uploads if not set
+UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # default
 
 SERVER_DOMAIN = os.environ.get("SERVER_URL")  # e.g., mydomain.com
 SERVER_URL = f"https://{SERVER_DOMAIN}/tika" if SERVER_DOMAIN else None
@@ -117,6 +126,28 @@ GDRIVE_MIME_EXT_MAP = {
 # ----------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # ----------------------------------------------------------------------------
+def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
+    """
+    - Combine all file text into one big string.
+    - Publish partial update once so aggregator merges the entire file's token freq.
+    - Fetch and return the updated vocab stats from Firestore.
+    """
+    # 1) Combine
+    combined_text = " ".join(file_texts)
+
+    # 2) Tokenize
+    tokens = tokenize_document(combined_text)
+
+    # 3) Publish partial update => aggregator merges term freq
+    publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
+
+    # 4) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    vocab_stats = get_project_vocab_stats(project_id)
+
+    return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
+
+
+
 
 
 def ensure_timezone_aware(dt):
@@ -214,69 +245,6 @@ def always_refresh_drive_token(ds):
         log.exception("[always_refresh_drive_token] Error refreshing token for DS:")
         return ds
 
-
-# def refresh_drive_token_if_needed(ds):
-#     refresh_token = ds.get("googleRefreshToken")
-#     if not refresh_token:
-#         log.warning(f"No refresh token for DS {ds['id']}; skipping refresh.")
-#         return ds
-
-#     expires_at = ds.get("googleExpiresAt")
-#     if expires_at:
-#         log.debug(f"googleExpiresAt: {expires_at} (type: {type(expires_at)})")
-#         try:
-#             if isinstance(expires_at, str):
-#                 expires_dt = parser.isoparse(expires_at)
-#             elif isinstance(expires_at, datetime):
-#                 expires_dt = expires_at
-#             else:
-#                 log.error(f"googleExpiresAt has unexpected type: {type(expires_at)}")
-#                 return ds
-
-#             expires_dt = ensure_timezone_aware(expires_dt)
-#             log.debug(f"Parsed expires_dt: {expires_dt} (tzinfo: {expires_dt.tzinfo})")
-
-#             if expires_dt > datetime.now(CENTRAL_TZ) + timedelta(minutes=5):
-#                 log.info(f"DS {ds['id']}: token still valid, no refresh needed.")
-#                 return ds
-#         except (ValueError, TypeError) as e:
-#             log.error(f"Error parsing googleExpiresAt: {expires_at}, error: {e}")
-
-#     token_url = "https://oauth2.googleapis.com/token"
-#     body_params = {
-#         "client_id": GOOGLE_CLIENT_ID,
-#         "client_secret": GOOGLE_CLIENT_SECRET,
-#         "refresh_token": refresh_token,
-#         "grant_type": "refresh_token",
-#     }
-#     try:
-#         resp = requests.post(token_url, data=body_params)
-#         if not resp.ok:
-#             log.error(f"Refresh request failed: {resp.text}")
-#             return ds
-#         td = resp.json()
-#         log.info(td)
-#         new_access_token = td.get("access_token")
-#         if not new_access_token:
-#             log.error(f"No access_token in refresh response: {td}")
-#             return ds
-
-#         expires_in = td.get("expires_in", 3920)
-#         now_dt = datetime.now(CENTRAL_TZ)
-#         new_expires_dt = now_dt + timedelta(seconds=expires_in)
-#         new_expires_str = new_expires_dt.isoformat()
-#         psql.update_data_source_by_id(
-#             ds["id"],
-#             googleAccessToken=new_access_token,
-#             googleExpiresAt=new_expires_str,
-#         )
-#         ds["googleAccessToken"] = new_access_token
-#         ds["googleExpiresAt"] = new_expires_str
-#         log.info(f"Refreshed token for DS {ds['id']}, expiresAt={new_expires_dt}")
-#         return ds
-#     except Exception as e:
-#         log.exception("Error refreshing token for DS:")
-#         return ds
 
 def _list_all_files_recursive(token: str, fld_id: str, ds) -> List[dict]:
     results = []
@@ -528,7 +496,10 @@ async def create_and_upload_embeddings_in_batches(
     max_batch_texts = 250
     max_batch_tokens = 14000
     enc = tiktoken.get_encoding("cl100k_base")
-
+    # 1) # ADDED for single-file BM25 update
+    all_file_texts = [text for (text, _page_num) in results if text.strip()]
+    # Update aggregator once, then retrieve vocab_stats
+    sparse_values = get_sparse_vector(all_file_texts, namespace, 300)
     for text, page_num in results:
         if not text.strip():
             continue
@@ -548,6 +519,7 @@ async def create_and_upload_embeddings_in_batches(
                         file_id,
                         data_source_id,
                         last_modified,
+                        sparse_values
                     )
                     batch.clear()
                     batch_token_count = 0
@@ -565,13 +537,13 @@ async def create_and_upload_embeddings_in_batches(
 
     if batch:
         await process_embedding_batch(
-            batch, filename, namespace, file_id, data_source_id, last_modified
+            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
         )
         batch.clear()
 
 
 async def process_embedding_batch(
-    batch, filename, namespace, file_id, data_source_id, last_modified
+    batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
 ):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
@@ -591,7 +563,7 @@ async def process_embedding_batch(
                 else str(last_modified)
             ),
         }
-        vectors.append({"id": doc_id, "values": embedding, "metadata": metadata})
+        vectors.append({"id": doc_id, "values": embedding,"sparse_values":sparse_values, "metadata": metadata})
 
     log.info(f"Upserting {len(vectors)} vectors to Pinecone for file_id={file_id}")
     index.upsert(vectors=vectors, namespace=namespace)
@@ -698,7 +670,7 @@ def run_job():
                 log.info(f"Skipping subfolder {gf_name}, but continuing recursion.")
                 continue
 
-            gf_key = generate_md5_hash(sub_for_hash, project_id, gf_id)
+            gf_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, gf_id)
             driveFileId_to_key[gf_id] = gf_key
             drive_file_keys.add(gf_key)
 

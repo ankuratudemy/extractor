@@ -65,26 +65,25 @@ index = pc.Index(PINECONE_INDEX_NAME)
 # HELPER FUNCTIONS
 # ----------------------------------------------------------------------------
 
-def get_sparse_values(document_text: str, project_id: str):
+def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
     """
-    Given a single text (string), compute a BM25-based sparse vector.
-    1) Tokenize the text
-    2) Publish partial update so aggregator can track df, N, etc.
-    3) Fetch the updated global stats from Firestore
-    4) Compute the BM25 sparse vector
+    - Combine all file text into one big string.
+    - Publish partial update once so aggregator merges the entire file's token freq.
+    - Fetch and return the updated vocab stats from Firestore.
     """
-    # 1) Tokenize
-    tokens = tokenize_document(document_text)
+    # 1) Combine
+    combined_text = " ".join(file_texts)
 
-    # 2) Publish partial update => aggregator merges term freq
+    # 2) Tokenize
+    tokens = tokenize_document(combined_text)
+
+    # 3) Publish partial update => aggregator merges term freq
     publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
 
-    # 3) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    # 4) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
     vocab_stats = get_project_vocab_stats(project_id)
 
-    # 4) Compute local sparse vector
-    sparse_vector = compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=300)
-    return sparse_vector
+    return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
 
 
 def ensure_timezone_aware(dt):
@@ -277,7 +276,10 @@ async def create_and_upload_embeddings_in_batches(
     max_batch_texts = 250
     max_batch_tokens = 14000
     enc = tiktoken.get_encoding("cl100k_base")
-
+    # 1) # ADDED for single-file BM25 update
+    all_file_texts = [text for (text, _page_num) in results if text.strip()]
+    # Update aggregator once, then retrieve vocab_stats
+    sparse_values = get_sparse_vector(all_file_texts, namespace, 300)
     for text, page_num in results:
         if not text.strip():
             continue
@@ -292,7 +294,7 @@ async def create_and_upload_embeddings_in_batches(
             ):
                 if batch:
                     await process_embedding_batch(
-                        batch, filename, namespace, file_id, data_source_id, last_modified
+                        batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
                     )
                     batch.clear()
                     batch_token_count = 0
@@ -310,13 +312,13 @@ async def create_and_upload_embeddings_in_batches(
 
     if batch:
         await process_embedding_batch(
-            batch, filename, namespace, file_id, data_source_id, last_modified
+            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
         )
         batch.clear()
 
 
 async def process_embedding_batch(
-    batch, filename, namespace, file_id, data_source_id, last_modified
+    batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
 ):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
@@ -327,9 +329,6 @@ async def process_embedding_batch(
     vectors = []
 
     for (text, page_num, chunk_idx), embedding in zip(batch, embeddings):
-        # For each chunk, compute its own sparse vector
-        sparse_values = get_sparse_values(text, namespace)
-
         doc_id = f"{data_source_id}#{file_id}#{page_num}#{chunk_idx}"
         metadata = {
             "text": text,
@@ -384,7 +383,7 @@ def get_s3_client(access_key, secret_key, region):
             'mode': 'standard'
         }
     )
-    return session.client('s3', config=config)
+    return session.client('s3',region_name=region, config=config)
 
 
 def list_s3_objects(s3_client, bucket_name, prefix=""):
@@ -514,7 +513,7 @@ def run_job():
                 last_modified = last_modified.replace(tzinfo=CENTRAL_TZ)
 
             # Build unique file_key
-            file_key = generate_md5_hash(sub_for_hash, project_id, s3key)
+            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, s3key)
             s3_key_to_md5[s3key] = file_key
             s3_file_keys.add(file_key)
 

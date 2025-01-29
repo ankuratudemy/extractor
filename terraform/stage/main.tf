@@ -15,7 +15,7 @@ locals {
   environment                          = var.environment # Set the desired environment here
   us_regions                           = ["us-central1"]
   regions                              = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"] : ["northamerica-northeast1", "northamerica-northeast2"]
-  fe_cpu                               = 1
+  fe_cpu                               = 2
   fe_memory                            = "2Gi"
   fe_port                              = 5000
   be_cpu                               = 1
@@ -50,16 +50,16 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-261.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:44.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-266.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:58.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer-23.0.0"
-  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-28.0.0"
-  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer-5.0.0"
-  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-6.0.0"
-  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-13.0.0"
-  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-2.0.0"
-  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-10.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer-26.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
+  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer-9.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-10.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-16.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-5.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-13.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -85,11 +85,11 @@ locals {
       be_min_inst      = 0
     }
     "northamerica-northeast2" = {
-      fe_max_inst      = local.environment == "prod" ? 1000 : 1
+      fe_max_inst      = local.environment == "prod" ? 500 : 1
       fe_min_inst      = 0
-      indexer_max_inst = local.environment == "prod" ? 1000 : 1
+      indexer_max_inst = local.environment == "prod" ? 500 : 1
       indexer_min_inst = 0
-      be_max_inst      = local.environment == "prod" ? 1000 : 10
+      be_max_inst      = local.environment == "prod" ? 500 : 10
       be_min_inst      = 0
     }
     "us-central1" = {
@@ -484,6 +484,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
       }
       env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+      env {
         name  = "UPLOADS_FOLDER"
         value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
       }
@@ -678,7 +682,7 @@ resource "google_cloudfunctions2_function" "credit_usage_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 10
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
     environment_variables = {
@@ -846,6 +850,14 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
         name  = "GCP_CREDIT_USAGE_TOPIC"
         value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
       }
+      env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
       env {
         name  = "UPLOADS_FOLDER"
         value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
@@ -1183,6 +1195,14 @@ resource "google_cloud_run_v2_job" "confluence_cloud_run_job" {
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
         }
         env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
           name  = "ENVIRONMENT"
           value = local.environment
         }
@@ -1376,7 +1396,7 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
     environment_variables = {
@@ -1472,6 +1492,14 @@ resource "google_cloud_run_v2_job" "gdrive_cloud_run_job" {
         env {
           name  = "GCP_CREDIT_USAGE_TOPIC"
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
         }
         env {
           name  = "ENVIRONMENT"
@@ -1685,7 +1713,7 @@ resource "google_cloudfunctions2_function" "gdrive_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
     environment_variables = {
@@ -1780,6 +1808,14 @@ resource "google_cloud_run_v2_job" "onedrive_cloud_run_job" {
         env {
           name  = "GCP_CREDIT_USAGE_TOPIC"
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
         }
         env {
           name  = "ENVIRONMENT"
@@ -1981,7 +2017,7 @@ resource "google_cloudfunctions2_function" "onedrive_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
 
@@ -2083,6 +2119,14 @@ resource "google_cloud_run_v2_job" "sharepoint_cloud_run_job" {
         env {
           name  = "GCP_CREDIT_USAGE_TOPIC"
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
         }
         env {
           name  = "ENVIRONMENT"
@@ -2285,7 +2329,7 @@ resource "google_cloudfunctions2_function" "sharepoint_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
 
@@ -2572,7 +2616,7 @@ resource "google_cloudfunctions2_function" "s3_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
 
@@ -2665,6 +2709,14 @@ resource "google_cloud_run_v2_job" "gcpbucket_cloud_run_job" {
         env {
           name  = "GCP_CREDIT_USAGE_TOPIC"
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
         }
         env {
           name  = "ENVIRONMENT"
@@ -2842,7 +2894,7 @@ resource "google_cloudfunctions2_function" "gcpbucket_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
 
@@ -2952,11 +3004,11 @@ resource "google_cloudfunctions2_function" "bm25_vocab_updater" {
   }
 
   service_config {
+    max_instance_count  = 10000
+    min_instance_count = 1
     available_memory               = "256M"
-    max_instance_count             = 10
     timeout_seconds                = 300
     all_traffic_on_latest_revision = true
-
     environment_variables = {
       GCP_PROJECT_ID = local.project_id,
       BM25_VOCAB_UPDATES_TOPIC = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
@@ -3017,6 +3069,14 @@ resource "google_cloud_run_v2_job" "azureblob_cloud_run_job" {
         env {
           name  = "GCP_CREDIT_USAGE_TOPIC"
           value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
         }
         env {
           name  = "ENVIRONMENT"
@@ -3192,7 +3252,7 @@ resource "google_cloudfunctions2_function" "azureblob_trigger_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 20
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
 

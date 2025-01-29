@@ -22,18 +22,27 @@ from dateutil import parser
 
 # Logging + Shared Imports
 from shared.logging_config import log
-from shared import psql, google_pub_sub, file_processor  # Adjust if needed
+from shared import psql, google_pub_sub, file_processor, google_auth  # Adjust if needed
 from pinecone.grpc import PineconeGRPC as Pinecone
 
 # If using Vertex AI for embeddings
 from vertexai.preview.language_models import TextEmbeddingModel
 
+# BM25 + sparse vector utilities (with no spaCy usage)
+from shared.bm25 import (
+    tokenize_document,
+    publish_partial_bm25_update,
+    compute_bm25_sparse_vector,
+    get_project_vocab_stats
+)
+
 # ----------------------------------------------------------------------------
 # ENV VARIABLES
 # ----------------------------------------------------------------------------
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+FIRESTORE_DB = os.environ.get("FIRESTORE_DB")
 GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
-UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # Default to /tmp/uploads if not set
+UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # default
 
 SERVER_DOMAIN = os.environ.get("SERVER_URL")  # e.g., mydomain.com
 SERVER_URL = f"https://{SERVER_DOMAIN}/tika" if SERVER_DOMAIN else None
@@ -56,6 +65,27 @@ index = pc.Index(PINECONE_INDEX_NAME)
 # ----------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # ----------------------------------------------------------------------------
+def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
+    """
+    - Combine all file text into one big string.
+    - Publish partial update once so aggregator merges the entire file's token freq.
+    - Fetch and return the updated vocab stats from Firestore.
+    """
+    # 1) Combine
+    combined_text = " ".join(file_texts)
+
+    # 2) Tokenize
+    tokens = tokenize_document(combined_text)
+
+    # 3) Publish partial update => aggregator merges term freq
+    publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
+
+    # 4) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    vocab_stats = get_project_vocab_stats(project_id)
+
+    return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
+
+
 
 def ensure_timezone_aware(dt: datetime) -> datetime:
     """
@@ -475,7 +505,10 @@ async def create_and_upload_embeddings_in_batches(
     max_batch_texts = 250
     max_batch_tokens = 14000
     enc = tiktoken.get_encoding("cl100k_base")
-
+    # 1) # ADDED for single-file BM25 update
+    all_file_texts = [text for (text, _page_num) in results if text.strip()]
+    # Update aggregator once, then retrieve vocab_stats
+    sparse_values = get_sparse_vector(all_file_texts, namespace, 300)
     for text, page_num in results:
         if not text.strip():
             continue
@@ -496,6 +529,7 @@ async def create_and_upload_embeddings_in_batches(
                         file_id,
                         data_source_id,
                         last_modified,
+                        sparse_values
                     )
                     batch.clear()
                     batch_token_count = 0
@@ -513,7 +547,7 @@ async def create_and_upload_embeddings_in_batches(
 
     if batch:
         await process_embedding_batch(
-            batch, filename, namespace, file_id, data_source_id, last_modified
+            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
         )
         batch.clear()
 
@@ -524,7 +558,8 @@ async def process_embedding_batch(
     namespace: str,
     file_id: str,
     data_source_id: str,
-    last_modified: datetime
+    last_modified: datetime,
+    sparse_values
 ):
     """
     Processes a batch of text chunks: creates embeddings and upserts them to Pinecone.
@@ -547,7 +582,7 @@ async def process_embedding_batch(
                 else str(last_modified)
             ),
         }
-        vectors.append({"id": doc_id, "values": embedding, "metadata": metadata})
+        vectors.append({"id": doc_id, "values": embedding,"sparse_values": sparse_values,  "metadata": metadata})
 
     log.info(f"Upserting {len(vectors)} vectors to Pinecone for file_id={file_id}")
     index.upsert(vectors=vectors, namespace=namespace)
@@ -681,7 +716,7 @@ def run_job():
             if item_folder:
                 continue
 
-            file_key = generate_md5_hash(sub_for_hash, project_id, item_id)
+            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, item_id)
             sharepointFileId_to_key[item_id] = file_key
             sharepoint_file_keys.add(file_key)
 
@@ -722,6 +757,7 @@ def run_job():
             )
             return ("No new/updated files, done.", 200)
 
+        # 3) Tika / embedding
         if not SERVER_URL:
             log.error("SERVER_URL is not set. Cannot proceed with Tika processing.")
             psql.update_data_source_by_id(
@@ -729,9 +765,21 @@ def run_job():
                 status="error",
                 updatedAt=datetime.now(CENTRAL_TZ).isoformat(),
             )
-            sys.exit("SERVER_URL is not set.")
+            return ("SERVER_URL is not set.", 500)
+
+        try:
+            bearer_token = google_auth.impersonated_id_token(serverurl=SERVER_DOMAIN).json()["token"]
+        except Exception as e:
+            log.exception("Failed to obtain impersonated ID token:")
+            psql.update_data_source_by_id(
+                data_source_id,
+                status="error",
+                updatedAt=datetime.now(CENTRAL_TZ).isoformat(),
+            )
+            return ("Failed to obtain impersonated ID token.", 500)
 
         headers = {
+            "Authorization": f"Bearer {bearer_token}",
             "X-Tika-PDFOcrStrategy": "auto",
             "Accept": "text/plain",
         }

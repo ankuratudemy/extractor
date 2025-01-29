@@ -31,15 +31,24 @@ from vertexai.preview.language_models import TextEmbeddingModel
 from google.cloud import storage
 from google.oauth2 import service_account
 
+# BM25 + sparse vector utilities (with no spaCy usage)
+from shared.bm25 import (
+    tokenize_document,
+    publish_partial_bm25_update,
+    compute_bm25_sparse_vector,
+    get_project_vocab_stats
+)
 
-# -----------------------------------------------------------------------------------
-# CONSTANTS & ENV VARS
-# -----------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# ENV VARIABLES
+# ----------------------------------------------------------------------------
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+FIRESTORE_DB = os.environ.get("FIRESTORE_DB")
+GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
+UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # default
 CENTRAL_TZ = ZoneInfo("America/Chicago")
 
-GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
-UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")
+
 
 SERVER_DOMAIN = os.environ.get("SERVER_URL")
 SERVER_URL = f"https://{SERVER_DOMAIN}/tika" if SERVER_DOMAIN else None
@@ -56,6 +65,26 @@ index = pc.Index(PINECONE_INDEX_NAME)
 # -----------------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------------------------------------------
+def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
+    """
+    - Combine all file text into one big string.
+    - Publish partial update once so aggregator merges the entire file's token freq.
+    - Fetch and return the updated vocab stats from Firestore.
+    """
+    # 1) Combine
+    combined_text = " ".join(file_texts)
+
+    # 2) Tokenize
+    tokens = tokenize_document(combined_text)
+
+    # 3) Publish partial update => aggregator merges term freq
+    publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
+
+    # 4) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    vocab_stats = get_project_vocab_stats(project_id)
+
+    return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
+
 
 def ensure_timezone_aware(dt):
     """Ensure a naive datetime is assigned CENTRAL_TZ if tzinfo is missing."""
@@ -253,10 +282,20 @@ def chunk_text(text, max_tokens=2048, overlap_chars=2000):
         end = start + max_tokens
     return chunks
 
-async def create_and_upload_embeddings_in_batches(results, filename, namespace, file_id, data_source_id, last_modified):
+async def create_and_upload_embeddings_in_batches(
+    results, filename, namespace, file_id, data_source_id, last_modified
+):
     """
-    Create embeddings for page text, batch them, and upsert to Pinecone.
+    1) Gather all text for the entire file.
+    2) Update aggregator (once) for the entire file, fetch vocab_stats.
+    3) Then chunk, embed, and compute sparse vectors for each chunk using that single vocab_stats.
     """
+    # 1) # ADDED for single-file BM25 update
+    all_file_texts = [text for (text, _page_num) in results if text.strip()]
+    # Update aggregator once, then retrieve vocab_stats
+    sparse_values = get_sparse_vector(all_file_texts, namespace, 300)
+
+    # The rest is basically the same, but we pass vocab_stats along
     batch = []
     batch_token_count = 0
     batch_text_count = 0
@@ -267,16 +306,17 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
     total_chunks = 0
     for text, page_num in results:
         if not text.strip():
-            log.info(f"Skipping empty text from page {page_num}.")
             continue
 
         text_chunks = chunk_text(text, max_tokens=2048, overlap_chars=2000)
         for i, chunk in enumerate(text_chunks):
             chunk_token_len = len(enc.encode(chunk))
-            # If adding this chunk exceeds any limit, process the current batch first
+            # If adding this chunk exceeds any limit, process the current batch
             if (batch_text_count + 1) > max_batch_texts or (batch_token_count + chunk_token_len > max_batch_tokens):
                 if batch:
-                    await process_embedding_batch(batch, filename, namespace, file_id, data_source_id, last_modified)
+                    await process_embedding_batch(
+                        batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
+                    )
                     total_chunks += len(batch)
                     batch.clear()
                     batch_text_count = 0
@@ -290,25 +330,28 @@ async def create_and_upload_embeddings_in_batches(results, filename, namespace, 
                 log.warning("Chunk too large or logic error preventing batch addition.")
                 continue
 
-    # Process any remaining chunks
     if batch:
-        await process_embedding_batch(batch, filename, namespace, file_id, data_source_id, last_modified)
+        await process_embedding_batch(
+            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
+        )
         total_chunks += len(batch)
         batch.clear()
 
     log.info(f"Total text chunks processed and upserted: {total_chunks}")
 
-async def process_embedding_batch(batch, filename, namespace, file_id, data_source_id, last_modified):
-    """
-    Embed a batch of text chunks, then upsert them into Pinecone.
-    """
+async def process_embedding_batch(
+    batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
+):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
     vectors = []
-    for (text, page_num, chunk_idx), embedding in zip(batch, embeddings):
+
+    for (chunk_text, page_num, chunk_idx), embedding in zip(batch, embeddings):
+        # Replaced old “get_sparse_values” with the new helper that uses pre-fetched stats
+
         doc_id = f"{data_source_id}#{file_id}#{page_num}#{chunk_idx}"
         metadata = {
-            "text": text,
+            "text": chunk_text,
             "source": filename,
             "page": page_num,
             "sourceType": "gcpBucket",
@@ -316,7 +359,12 @@ async def process_embedding_batch(batch, filename, namespace, file_id, data_sour
             "fileId": file_id,
             "lastModified": last_modified.isoformat() if hasattr(last_modified, "isoformat") else str(last_modified),
         }
-        vectors.append({"id": doc_id, "values": embedding, "metadata": metadata})
+        vectors.append({
+            "id": doc_id,
+            "values": embedding,
+            "sparse_values": sparse_values,
+            "metadata": metadata
+        })
 
     log.info(f"Upserting {len(vectors)} vectors to Pinecone for file_id={file_id}")
     try:
@@ -467,7 +515,7 @@ def run_job():
             if not last_modified.tzinfo:
                 last_modified = last_modified.replace(tzinfo=CENTRAL_TZ)
 
-            file_key = generate_md5_hash(sub_for_hash, project_id, gcp_key)
+            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, gcp_key)
             gcp_file_keys.add(file_key)
 
             if file_key not in db_file_keys:
@@ -535,7 +583,7 @@ def run_job():
 
         # 11) Process each file
         for (blob, gcp_key, last_modified) in to_process:
-            file_key = generate_md5_hash(sub_for_hash, project_id, gcp_key)
+            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, gcp_key)
             now_dt = datetime.now(CENTRAL_TZ)
             base_name = os.path.basename(gcp_key)
 
