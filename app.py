@@ -21,6 +21,8 @@ from shared.bm25 import (
     tokenize_document,
     compute_bm25_sparse_vector,
     get_project_vocab_stats,
+    get_project_alpha,
+    hybrid_score_norm
 )
 from langchain_core.outputs import LLMResult
 from langchain_google_vertexai.model_garden import ChatAnthropicVertex
@@ -825,6 +827,11 @@ async def getVectorStoreDocs(request):
         # Adjust max_terms as needed
         sparse_vec = get_sparse_vector(query_str, project_id, vocab_stats, 300)
 
+        # get project alpha
+        alpha = get_project_alpha(vocab_stats)
+
+        #Get weghted dense, sparse vectors
+        dv,sv = hybrid_score_norm(dense=dense_vec, sparse=sparse_vec, alpha=alpha)
         # Example format of sparse_vec:
         # {
         #    "indices": [...],
@@ -834,8 +841,8 @@ async def getVectorStoreDocs(request):
         # the dense + sparse dot products. E.g. 'dot_product', 'cosine', or use 'sum'.
         response = index.query(
             namespace=str(namespace),
-            vector=dense_vec,
-            sparse_vector=sparse_vec,
+            vector=dv,
+            sparse_vector=sv,
             top_k=topk,
             include_values=False,
             include_metadata=True,

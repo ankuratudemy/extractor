@@ -234,3 +234,64 @@ def get_project_vocab_stats(project_id: str) -> dict:
         "avgdl": avgdl,
         "vocab": vocab_data
     }
+
+def get_project_alpha(
+    vocab_stats: dict,
+    alpha_config: dict = None
+) -> float:
+    """
+    Returns a dynamic alpha based on the total document count (N) in the BM25 vocab stats.
+    
+    :param vocab_stats: The dictionary containing 'N', 'avgdl', and 'vocab' from Firestore.
+    :param alpha_config: A dict that can hold custom thresholds and alpha values, e.g.:
+        {
+            "min_doc_threshold": 50,
+            "alpha_below_threshold": 0.9,
+            "alpha_above_threshold": 0.5
+        }
+      where:
+       - min_doc_threshold: if N < this, we consider the doc count "low"
+       - alpha_below_threshold: alpha to use when N < min_doc_threshold
+       - alpha_above_threshold: alpha to use when N >= min_doc_threshold
+    
+    :return: A float alpha ∈ [0,1].
+             alpha=1 -> 100% dense
+             alpha=0 -> 100% sparse
+    """
+    if alpha_config is None:
+        alpha_config = {}
+    
+    # Fallback defaults
+    min_doc_threshold = alpha_config.get("min_doc_threshold", 50)
+    alpha_below       = alpha_config.get("alpha_below_threshold", 0.9)
+    alpha_above       = alpha_config.get("alpha_above_threshold", 0.5)
+    
+    # Fetch doc count from vocab
+    doc_count = vocab_stats.get("N", 1)
+    
+    # If doc_count is less than threshold, weigh dense more heavily (alpha ↑).
+    if doc_count < min_doc_threshold:
+        return alpha_below
+    else:
+        return alpha_above
+
+
+def hybrid_score_norm(dense, sparse, alpha: float):
+    """Hybrid score using a convex combination
+
+    alpha * dense + (1 - alpha) * sparse
+
+    Args:
+        dense: Array of floats representing
+        sparse: a dict of `indices` and `values`
+        alpha: scale between 0 and 1
+    """
+    if alpha < 0 or alpha > 1:
+        raise ValueError("Alpha must be between 0 and 1")
+    hs = {
+        'indices': sparse['indices'],
+        'values':  [v * (1 - alpha) for v in sparse['values']]
+    }
+    return [v * alpha for v in dense], hs
+
+
