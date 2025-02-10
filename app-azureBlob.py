@@ -31,7 +31,7 @@ from shared.common_code import (
   remove_file_from_db_and_pinecone,
   convert_to_pdf,
   process_pages_async,
-  _process_xlsx_blob,
+  process_xlsx_blob,
   CENTRAL_TZ,
   UPLOADS_FOLDER,
   SERVER_URL,
@@ -273,6 +273,7 @@ def run_job():
                             file_key,
                             data_source_id,
                             last_modified=last_modified,
+                            sourceType="azureBlob"
                         )
                     )
                 except Exception as e:
@@ -314,7 +315,7 @@ def run_job():
             async with aiohttp.ClientSession() as session:
                 for (f_key, b_name, tmp_path, last_modified) in xlsx_files:
                     tasks.append(
-                        _process_xlsx_blob(
+                        process_xlsx_blob(
                             session,
                             f_key,
                             b_name,

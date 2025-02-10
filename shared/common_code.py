@@ -1,5 +1,7 @@
 # BM25 + sparse vector utilities (with no spaCy usage)
 import os
+import io
+import ssl
 import sys
 import signal
 import json
@@ -165,7 +167,7 @@ async def _async_put_page(session, url, page_data, page_num, headers, max_retrie
     raise RuntimeError(f"Failed after {max_retries} tries for page {page_num}")
 
 async def process_pages_async(
-    pages, headers, filename, namespace, file_id, data_source_id, last_modified
+    pages, headers, filename, namespace, file_id, data_source_id, last_modified, sourceType
 ):
     if not SERVER_URL:
         raise ValueError("SERVER_URL is not set, cannot call Tika.")
@@ -180,7 +182,7 @@ async def process_pages_async(
 
     log.info("All pages extracted. Now chunk, embed, and upsert to Pinecone.")
     await create_and_upload_embeddings_in_batches(
-        results, filename, namespace, file_id, data_source_id, last_modified
+        results, filename, namespace, file_id, data_source_id, last_modified, sourceType
     )
     return results
 
@@ -211,7 +213,7 @@ def chunk_text(text, max_tokens=2048, overlap_chars=2000):
     return chunks
 
 async def process_embedding_batch(
-    batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
+    batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values, sourceType
 ):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
@@ -222,7 +224,7 @@ async def process_embedding_batch(
             "text": text,
             "source": filename,
             "page": page_num,
-            "sourceType": "azureBlob",
+            "sourceType": sourceType,
             "dataSourceId": data_source_id,
             "fileId": file_id,
             "lastModified": (
@@ -248,7 +250,7 @@ async def get_google_embedding(queries, model_name="text-multilingual-embedding-
 
 
 async def create_and_upload_embeddings_in_batches(
-    results, filename, namespace, file_id, data_source_id, last_modified
+    results, filename, namespace, file_id, data_source_id, last_modified, sourceType
 ):
     batch = []
     batch_token_count = 0
@@ -271,7 +273,7 @@ async def create_and_upload_embeddings_in_batches(
             if ((batch_text_count + 1) > max_batch_texts) or (batch_token_count + chunk_token_len > max_batch_tokens):
                 if batch:
                     await process_embedding_batch(
-                        batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
+                        batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values, sourceType
                     )
                     batch.clear()
                     batch_text_count = 0
@@ -340,7 +342,7 @@ async def _call_xlsx_endpoint(session, xlsx_flask_url, file_path, base_name, pro
             js = await resp.text()
         return (status, js)
 
-async def _process_xlsx_blob(
+async def process_xlsx_blob(
     session,  # shared ClientSession
     file_key,
     base_name,
