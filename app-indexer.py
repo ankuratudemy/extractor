@@ -137,13 +137,13 @@ async def get_google_embedding(queries):
     return embeddings
 
 
-async def async_put_request(session, url, payload, page_num, headers, max_retries=10):
+async def async_put_request(session, url, payload, page_num, headers, max_retries=30):
     retries = 0
     while retries < max_retries:
         try:
             payload_copy = io.BytesIO(payload.getvalue())
             async with session.put(url, data=payload_copy, headers=headers, timeout=aiohttp.ClientTimeout(total=300)) as response:
-                if response.status == 429:
+                if response.status == 429 or response.status == 500:
                     log.warning(
                         f"Retrying request for page {page_num}, Retry #{retries + 1}")
                     retries += 1
@@ -172,6 +172,17 @@ def upload_to_pinecone(vectors, namespace):
     return indexres
 
 
+def remove_file_from_db_and_pinecone(file_id, namespace):
+    vector_id_prefix = f"{file_id}#"
+    try:
+        for ids in index.list(prefix=vector_id_prefix, namespace=namespace):
+            log.info(f"Azure Pinecone Ids to delete: {ids}")
+            index.delete(ids=ids, namespace=namespace)
+        log.info(f"Removed Pinecone vectors with prefix={vector_id_prefix}")
+    except Exception as e:
+        log.exception(f"Error removing vector {vector_id_prefix} from Pinecone:")
+
+
 async def process_embedding_batch(batch, filename, namespace, file_id, sparse_values):
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
@@ -193,7 +204,8 @@ async def process_embedding_batch(batch, filename, namespace, file_id, sparse_va
             "sparse_values": sparse_values,
             "metadata": metadata
         })
-
+    # Delete exsiting entries from pinecone beore adding new ones:
+    remove_file_from_db_and_pinecone(file_id, namespace)
     upload_to_pinecone(vectors, namespace)
     # Clear memory
     del vectors, embeddings, texts, page_num
@@ -351,6 +363,9 @@ def event_handler():
 
             # If no remaining credits, short-circuit and update status
             file_id = generate_md5_hash(subscription_id, project_id, filename)
+            file_details = psql.fetch_file_by_id(file_id=file_id)
+            if not file_details:
+                return 
             if remaining_credits <= 0:
                 log.error(
                     f"No credits left for subscription {subscription_id}. File {filename} not processed.")

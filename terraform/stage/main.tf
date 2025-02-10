@@ -14,13 +14,16 @@ variable "environment" {
 locals {
   environment                          = var.environment # Set the desired environment here
   us_regions                           = ["us-central1"]
-  regions                              = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"] : ["northamerica-northeast1", "northamerica-northeast2"]
+  regions                              = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"] : ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"]
   fe_cpu                               = 2
   fe_memory                            = "2Gi"
   fe_port                              = 5000
   be_cpu                               = 1
   be_memory                            = "2Gi"
   be_port                              = 9998
+  xlsx_cpu                             = 1
+  xlsx_memory                          = "2Gi"
+  xlsx_port                            = 9999
   indexer_cpu                          = 1
   indexer_memory                       = "2Gi"
   indexer_port                         = 5000
@@ -50,15 +53,16 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-266.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:58.0.0"
+  xlsx_image                            = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:7.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-271.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:61.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
   gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer-26.0.0"
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
   onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer-9.0.0"
   sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-10.0.0"
   s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-16.0.0"
-  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-5.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-7.0.0"
   gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-13.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
@@ -68,28 +72,28 @@ locals {
   fe_service_name_prefix               = "xtract-fe"
   indexer_service_name_prefix          = "xtract-indexer"
   be_service_name_prefix               = "xtract-be"
+  xlsx_service_name_prefix             = "xlsx-be"
   fe_hc_path                           = "/health"
   be_hc_path                           = "/tika"
   fe_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   indexer_domain_suffix                = local.environment == "prod" ? "" : "-stage"
   be_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   websearch_domain_suffix              = local.environment == "prod" ? "" : "-stage"
+  xlsx_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
 
   region_instance_counts = {
     "northamerica-northeast1" = {
-      fe_max_inst      = local.environment == "prod" ? 1000 : 1
+      fe_max_inst      = local.environment == "prod" ? 1000 : 1000
       fe_min_inst      = 0
-      indexer_max_inst = local.environment == "prod" ? 1000 : 1
+      indexer_max_inst = local.environment == "prod" ? 1000 : 1000
       indexer_min_inst = 0
-      be_max_inst      = local.environment == "prod" ? 1000 : 10
+      be_max_inst      = local.environment == "prod" ? 1000 : 1000
       be_min_inst      = 0
     }
     "northamerica-northeast2" = {
-      fe_max_inst      = local.environment == "prod" ? 500 : 1
+      fe_max_inst      = local.environment == "prod" ? 500 : 500
       fe_min_inst      = 0
-      indexer_max_inst = local.environment == "prod" ? 500 : 1
-      indexer_min_inst = 0
-      be_max_inst      = local.environment == "prod" ? 500 : 10
+      be_max_inst      = local.environment == "prod" ? 500 : 500
       be_min_inst      = 0
     }
     "us-central1" = {
@@ -443,6 +447,16 @@ resource "google_compute_region_network_endpoint_group" "be_backend" {
     service = google_cloud_run_v2_service.be_cloud_run[local.regions[count.index]].name
   }
 }
+
+resource "google_compute_region_network_endpoint_group" "xlsx_backend" {
+  count                 = length(local.regions)
+  name                  = "${local.xlsx_service_name_prefix}${local.xlsx_domain_suffix}-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = local.regions[count.index]
+  cloud_run {
+    service = google_cloud_run_v2_service.xlsx_cloud_run[local.regions[count.index]].name
+  }
+}
 resource "google_cloud_run_v2_service" "fe_cloud_run" {
   for_each = toset(local.regions)
   name     = "${local.fe_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
@@ -474,6 +488,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
       env {
         name  = "WEBSEARCH_SERVER_URL"
         value = local.environment == "prod" ? "websearch.structhub.io" : "stage-websearch.structhub.io"
+      }
+      env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
       }
       env {
         name  = "GCP_PROJECT_ID"
@@ -1092,6 +1110,10 @@ resource "google_compute_global_address" "websearch_external_ip" {
   name = "websearch${local.websearch_domain_suffix}-ip"
 }
 
+resource "google_compute_global_address" "xlsx_external_ip" {
+  name = "xlsx${local.xlsx_domain_suffix}-ip"
+}
+
 resource "google_compute_backend_service" "websearch_backend" {
   name                            = "websearch${local.websearch_domain_suffix}-backend"
   load_balancing_scheme           = "EXTERNAL_MANAGED"
@@ -1104,6 +1126,26 @@ resource "google_compute_backend_service" "websearch_backend" {
 
     content {
       group = google_compute_region_network_endpoint_group.websearch_backend[backend.key].id
+    }
+  }
+
+  depends_on = [
+    google_project_service.compute_api,
+  ]
+}
+
+resource "google_compute_backend_service" "xlsx_backend" {
+  name                            = "xlsx${local.xlsx_domain_suffix}-backend"
+  load_balancing_scheme           = "EXTERNAL_MANAGED"
+  connection_draining_timeout_sec = 3600
+  locality_lb_policy              = "RANDOM"
+  enable_cdn                      = false
+
+  dynamic "backend" {
+    for_each = local.regions
+
+    content {
+      group = google_compute_region_network_endpoint_group.xlsx_backend[backend.key].id
     }
   }
 
@@ -1133,6 +1175,38 @@ resource "google_compute_target_https_proxy" "websearch_https_proxy" {
 resource "google_compute_url_map" "websearch_url_map" {
   name            = "websearch${local.websearch_domain_suffix}"
   default_service = google_compute_backend_service.websearch_backend.id
+}
+
+resource "google_compute_managed_ssl_certificate" "xlsx_ssl_cert" {
+  name = "xlsx${local.xlsx_domain_suffix}-cert"
+  managed {
+    domains = [local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"]
+  }
+}
+
+resource "google_compute_target_https_proxy" "xlsx_https_proxy" {
+  name                        = "xlsx${local.xlsx_domain_suffix}-https"
+  ssl_certificates            = [google_compute_managed_ssl_certificate.xlsx_ssl_cert.id]
+  url_map                     = google_compute_url_map.xlsx_url_map.id
+  http_keep_alive_timeout_sec = 610
+
+  depends_on = [
+    google_compute_managed_ssl_certificate.xlsx_ssl_cert
+  ]
+}
+
+resource "google_compute_url_map" "xlsx_url_map" {
+  name            = "xlsx${local.xlsx_domain_suffix}"
+  default_service = google_compute_backend_service.xlsx_backend.id
+}
+
+resource "google_compute_global_forwarding_rule" "xlsx_forwarding_rule" {
+  name                  = "xlsx${local.xlsx_domain_suffix}-https"
+  target                = google_compute_target_https_proxy.xlsx_https_proxy.id
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  ip_address            = google_compute_global_address.xlsx_external_ip.id
+  port_range            = "443"
+  depends_on            = [google_compute_target_https_proxy.xlsx_https_proxy]
 }
 
 resource "google_compute_global_forwarding_rule" "websearch_forwarding_rule" {
@@ -1174,7 +1248,6 @@ resource "google_cloud_run_v2_job" "confluence_cloud_run_job" {
 
   # Name your job. You can tweak this however you like.
   name                = "confluence-job${local.indexer_domain_suffix}-${each.key}"
-  deletion_protection = false
   location            = each.key
 
   template {
@@ -2684,7 +2757,6 @@ resource "google_cloud_run_v2_job" "gcpbucket_cloud_run_job" {
   for_each = toset(local.us_regions)
 
   name                = "gcpbucket-job${local.indexer_domain_suffix}-${each.key}"
-  deletion_protection = false
   location            = each.key
 
   template {
@@ -3044,7 +3116,6 @@ resource "google_cloud_run_v2_job" "azureblob_cloud_run_job" {
   for_each = toset(local.us_regions)
 
   name                = "azureblob-job${local.indexer_domain_suffix}-${each.key}"
-  deletion_protection = false
   location            = each.key
 
   template {
@@ -3057,6 +3128,10 @@ resource "google_cloud_run_v2_job" "azureblob_cloud_run_job" {
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -3303,4 +3378,162 @@ resource "google_cloudfunctions2_function" "azureblob_trigger_function" {
 resource "google_pubsub_subscription" "azure_dead_letter_subscription" {
   name  = "azureblob_dead_letter_subscription${local.fe_domain_suffix}"
   topic = google_pubsub_topic.azureblob_topic_dead_letter_topic.name
+}
+
+# New xlsx-indexer service
+resource "google_cloud_run_v2_service" "xlsx_cloud_run" {
+  for_each = toset(local.regions)
+
+  name     = "${local.xlsx_service_name_prefix}${local.xlsx_domain_suffix}-${each.key}"
+  
+  location = each.key
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  template {
+    scaling {
+      max_instance_count = local.region_instance_counts[each.key].be_max_inst
+      min_instance_count = local.region_instance_counts[each.key].be_min_inst
+    }
+    containers {
+      env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+      ports {
+        container_port = local.xlsx_port
+      }
+      image = local.xlsx_image
+      resources {
+        limits = {
+          cpu    = local.xlsx_cpu
+          memory = local.xlsx_memory
+        }
+      }
+    }
+    timeout                          = "3600s"  # 1 hour for xlsx-indexer
+    max_instance_request_concurrency = 1  # Recommended for long-running tasks
+  }
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+  custom_audiences = [local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"]
+  depends_on = [
+    google_project_service.run_api
+  ]
 }

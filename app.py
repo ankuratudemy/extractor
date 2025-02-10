@@ -829,7 +829,7 @@ async def getVectorStoreDocs(request):
 
         # get project alpha
         alpha = get_project_alpha(vocab_stats)
-
+        log.info(f"Alpha {alpha}")
         #Get weghted dense, sparse vectors
         dv,sv = hybrid_score_norm(dense=dense_vec, sparse=sparse_vec, alpha=alpha)
         # Example format of sparse_vec:
@@ -891,7 +891,7 @@ async def getVectorStoreDocs(request):
         )
 
     # Optional: reorder based on regex/keyword matches
-    doc_list = await search_helper.reorder_docs(doc_list, keywords)
+    # doc_list = await search_helper.reorder_docs(doc_list, keywords)
 
     # ---------------------------------------------------------------------
     # 5) Respect token limits; pick up to topk docs without exceeding ~50k tokens
@@ -974,17 +974,19 @@ def askme():
 
         raw_context = (
             f"""
-                    You are a helpful assistant.
-                    Always respond to the user's question with a JSON object containing three keys:
-                    - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation with 1. Make sure this section is in markdown format.
-                    - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include  a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
-                    - `followup_question`: This key should contain a follow-up question relevant to the user's query.
+                You are a helpful assistant.
+                Always respond to the user's question with a JSON object containing three keys:
+                - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation numbering from 1. Make sure this section is in markdown format.
+                - `sources`: This key should be an array of the original chunks of context used in generating the answer. Each source should include a `citation` field (the reference number), a `page` field (the page value), and the `source` field (the file name or URL). Each source should appear only once in this array.
+                - `followup_question`: This key should contain a follow-up question relevant to the user's query, phrased in the **first person**, as if the user is asking the question themselves. Do not use "Would you like" or "Do you want"; instead, structure the question directly as the user’s request.
 
-                    Make sure to only include `sources` from which citations are created. DO NOT include sources not used in generating the final answer.
-                    DO NOT use your existing information and only use the information provided below to generate fial answer.
-                    Use this data from the private knowledge store {docData} and consider the conversation history {history}, which always have source information including file page, page number, and URLs for different sources.
-                    Respond in JSON format. Do not add ```json at the beginning or ``` at the end of response. The output needs to only have JSON data, nothing else. THIS IS VERY IMPORTANT. Do not duplicate sources in the `sources` array.
-                    """
+                Make sure to only include `sources` from which citations are created. **DO NOT** include sources that were not used in generating the final answer.
+                **DO NOT** use any prior knowledge; rely **only** on the provided information.
+                Use this data from the private knowledge store {docData}, which always includes source information such as file pages, page numbers, and URLs.
+
+                Respond in JSON format. **Do not add** ```json at the beginning or ``` at the end of the response. The output must contain only JSON data, nothing else. **THIS IS VERY IMPORTANT.** Do not duplicate sources in the `sources` array.
+                """
+
         )
 
         question = f"{query}"
