@@ -63,7 +63,7 @@ locals {
   sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-10.0.0"
   s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-17.0.0"
   azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-12.0.0"
-  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-13.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-14.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
