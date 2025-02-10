@@ -289,7 +289,7 @@ async def create_and_upload_embeddings_in_batches(
 
     if batch:
         await process_embedding_batch(
-            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values
+            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values, sourceType
         )
         batch.clear()
 
@@ -397,3 +397,8 @@ async def process_xlsx_blob(
         error_msg = f"Exception calling XLSX ingestion: {str(e)}"
 
     return final_status, usage_credits, error_msg
+
+
+def shutdown_handler(sig, frame):
+    log.info(f"Caught signal {signal.strsignal(sig)}. Exiting.")
+    sys.exit(0)
