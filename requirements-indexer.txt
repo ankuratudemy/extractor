@@ -19,7 +19,7 @@ flask_httpauth
 google-cloud-pubsub
 google-cloud-storage
 google-cloud-aiplatform
-pinecone-client
+pinecone[grpc]==5.4.2
 openai
 pyarmor
 cython

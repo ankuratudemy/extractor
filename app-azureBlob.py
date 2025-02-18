@@ -24,25 +24,26 @@ from dateutil import parser
 from shared.logging_config import log
 from shared import psql, google_pub_sub, google_auth, file_processor
 from shared.common_code import (
-  ensure_timezone_aware,
-  get_event_loop,
-  generate_md5_hash,
-  compute_next_sync_time,
-  remove_file_from_db_and_pinecone,
-  convert_to_pdf,
-  process_pages_async,
-  process_xlsx_blob,
-  CENTRAL_TZ,
-  UPLOADS_FOLDER,
-  SERVER_URL,
-  GCP_CREDIT_USAGE_TOPIC,
-  GCP_PROJECT_ID,
-  SERVER_DOMAIN
+    ensure_timezone_aware,
+    get_event_loop,
+    generate_md5_hash,
+    compute_next_sync_time,
+    remove_file_from_db_and_pinecone,
+    convert_to_pdf,
+    process_pages_async,
+    process_xlsx_blob,
+    CENTRAL_TZ,
+    UPLOADS_FOLDER,
+    SERVER_URL,
+    GCP_CREDIT_USAGE_TOPIC,
+    GCP_PROJECT_ID,
+    SERVER_DOMAIN,
 )
 
 # Azure blob
 from azure.storage.blob import BlobServiceClient, ContainerClient
 from azure.core.exceptions import ResourceNotFoundError
+
 
 # ----------------------------------------------------------------------------
 # MAIN RUN
@@ -84,7 +85,7 @@ def run_job():
 
         if not azure_account_name or not azure_account_key or not container_name:
             log.error("Missing Azure credentials or container in ds record.")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("Missing azure credentials or containerName", 400)
 
         last_sync_time = ds.get("lastSyncTime") or event_data.get("lastSyncTime")
@@ -135,7 +136,9 @@ def run_job():
             if not last_modified.tzinfo:
                 last_modified = last_modified.replace(tzinfo=CENTRAL_TZ)
 
-            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, blob_name)
+            file_key = generate_md5_hash(
+                sub_for_hash, project_id, data_source_id, blob_name
+            )
             azure_file_keys.add(file_key)
 
             if file_key not in db_file_keys:
@@ -149,7 +152,9 @@ def run_job():
         removed_keys = db_file_keys - azure_file_keys
         log.info(f"Removed keys from DB: {removed_keys}")
         for r_key in removed_keys:
-            remove_file_from_db_and_pinecone(r_key, data_source_id, project_id, namespace=project_id)
+            remove_file_from_db_and_pinecone(
+                r_key, data_source_id, project_id, namespace=project_id
+            )
 
         log.info(f"New files => {len(new_files)}, Updated => {len(updated_files)}")
         to_process = new_files + updated_files
@@ -159,7 +164,9 @@ def run_job():
                 data_source_id,
                 status="processed",
                 lastSyncTime=now_dt.isoformat(),
-                nextSyncTime=compute_next_sync_time(now_dt, ds.get("syncOption")).isoformat(),
+                nextSyncTime=compute_next_sync_time(
+                    now_dt, ds.get("syncOption")
+                ).isoformat(),
             )
             return ("No new/updated files, done", 200)
 
@@ -169,12 +176,12 @@ def run_job():
             # You can decide if you want to fail or skip PDF.
 
         try:
-            bearer_token = google_auth.impersonated_id_token(serverurl=SERVER_DOMAIN).json()["token"]
+            bearer_token = google_auth.impersonated_id_token(
+                serverurl=SERVER_DOMAIN
+            ).json()["token"]
         except Exception as e:
             log.exception("Failed to obtain impersonated ID token:")
-            psql.update_data_source_by_id(
-                data_source_id, status="error", updatedAt=datetime.now(CENTRAL_TZ).isoformat()
-            )
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("Failed to obtain impersonated ID token.", 500)
 
         headers = {
@@ -190,7 +197,9 @@ def run_job():
         xlsx_tasks = []
 
         for blob, blob_name, last_modified in to_process:
-            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, blob_name)
+            file_key = generate_md5_hash(
+                sub_for_hash, project_id, data_source_id, blob_name
+            )
             now_dt = datetime.now(CENTRAL_TZ)
             base_name = os.path.basename(blob_name)
 
@@ -212,7 +221,9 @@ def run_job():
                 )
                 db_file_keys_list.add(file_key)
             else:
-                psql.update_file_by_id(file_key, status="processing", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="processing", updatedAt=now_dt.isoformat()
+                )
 
             extension = "pdf"
             if "." in blob_name:
@@ -225,37 +236,149 @@ def run_job():
                     f.write(download_stream.readall())
             except Exception as e:
                 log.exception(f"Failed to download azure blob: {blob_name}")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             # If it's XLSX, queue up a parallel task
-            if extension == "xlsx":
+            if extension in ["csv", "xls", "xltm", "xltx", "xlsx", "tsv", "ots"]:
                 # We'll *not* process immediately. We'll add an async task for later concurrency
                 xlsx_tasks.append((file_key, base_name, local_tmp_path, last_modified))
                 continue
 
-            # ----------------------------
-            # PDF / DOCX / PPTX Flow
-            # ----------------------------
-            if extension in ["docx", "pptx", "pdf"]:
+            if extension in [
+                "pdf",
+                "docx",
+                "odt",
+                "odp",
+                "odg",
+                "odf",
+                "fodt",
+                "fodp",
+                "fodg",
+                "123",
+                "dbf",
+                "scm",
+                "dotx",
+                "docm",
+                "dotm",
+                "xml",
+                "doc",
+                "qpw",
+                "pptx",
+                "ppsx",
+                "ppmx",
+                "potx",
+                "pptm",
+                "ppam",
+                "ppsm",
+                "pptm",
+                "ppam",
+                "ppt",
+                "pps",
+                "ppt",
+                "ppa",
+                "rtf",
+                "jpg",
+                "jpeg",
+                "png",
+                "gif",
+                "tiff",
+                "bmp",
+                "eml",
+                "msg",
+                "pst",
+                "ost",
+                "mbox",
+                "dbx",
+                "dat",
+                "emlx",
+                "ods",
+            ]:
+
                 def process_local_file(temp_path, file_ext):
                     if file_ext == "pdf":
                         with open(temp_path, "rb") as f_in:
                             pdf_data = f_in.read()
                         return file_processor.split_pdf(pdf_data)
-                    elif file_ext in ["docx", "pptx"]:
+                    elif file_ext in [
+                        "docx",
+                        "odt",
+                        "odp",
+                        "odg",
+                        "odf",
+                        "fodt",
+                        "fodp",
+                        "fodg",
+                        "123",
+                        "dbf",
+                        "scm",
+                        "dotx",
+                        "docm",
+                        "dotm",
+                        "xml",
+                        "doc",
+                        "qpw",
+                        "pptx",
+                        "ppsx",
+                        "ppmx",
+                        "potx",
+                        "pptm",
+                        "ppam",
+                        "ppsm",
+                        "pptm",
+                        "ppam",
+                        "ppt",
+                        "pps",
+                        "ppt",
+                        "ppa",
+                        "rtf",
+                    ]:
                         pdf_data = convert_to_pdf(temp_path, file_ext)
                         if pdf_data:
                             return file_processor.split_pdf(pdf_data)
                         else:
                             raise ValueError("Conversion to PDF failed for Azure file.")
+                    elif extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
+                        # Treat as a single "page"
+                        with open(temp_path, "rb") as f:
+                            image_data = f.read()
+                        pages = [("1", io.BytesIO(image_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in [
+                        "eml",
+                        "msg",
+                        "pst",
+                        "ost",
+                        "mbox",
+                        "dbx",
+                        "dat",
+                        "emlx",
+                    ]:
+                        with open(temp_path, "rb") as f:
+                            msg_data = f.read()
+                        pages = [("1", io.BytesIO(msg_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in ["ods"]:
+                        with open(temp_path, "rb") as f:
+                            ods_data = f.read()
+                        pages = file_processor.split_ods(ods_data)
+                        num_pages = len(pages)
+                        return pages, num_pages
                     raise ValueError("Unsupported file format in Azure ingestion logic")
 
                 try:
-                    final_pages, final_num_pages = process_local_file(local_tmp_path, extension)
+                    final_pages, final_num_pages = process_local_file(
+                        local_tmp_path, extension
+                    )
                 except Exception as e:
                     log.error(f"Failed processing {base_name} as {extension}: {str(e)}")
-                    psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        file_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
                     if os.path.exists(local_tmp_path):
                         os.remove(local_tmp_path)
                     continue
@@ -273,35 +396,52 @@ def run_job():
                             file_key,
                             data_source_id,
                             last_modified=last_modified,
-                            sourceType="azureBlob"
+                            sourceType="azureBlob",
                         )
                     )
                 except Exception as e:
                     log.exception(f"Failed Tika/embedding for {base_name}:")
-                    psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        file_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
                     continue
 
                 # Mark processed
-                psql.update_file_by_id(file_key, status="processed", pageCount=len(results), updatedAt=datetime.now(CENTRAL_TZ).isoformat())
+                psql.update_file_by_id(
+                    file_key,
+                    status="processed",
+                    pageCount=len(results),
+                    updatedAt=datetime.now(CENTRAL_TZ).isoformat(),
+                )
 
                 # usage
                 used_credits = len(results) * 1.5
                 if sub_id:
-                    message = json.dumps({
-                        "subscription_id": sub_id,
-                        "data_source_id": data_source_id,
-                        "project_id": project_id,
-                        "creditsUsed": used_credits,
-                    })
+                    message = json.dumps(
+                        {
+                            "subscription_id": sub_id,
+                            "data_source_id": data_source_id,
+                            "project_id": project_id,
+                            "creditsUsed": used_credits,
+                        }
+                    )
                     try:
-                        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message)
+                        google_pub_sub.publish_messages_with_retry_settings(
+                            GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message
+                        )
                     except Exception as e:
-                        log.warning(f"Publish usage failed for Azure file {base_name}: {str(e)}")
+                        log.warning(
+                            f"Publish usage failed for Azure file {base_name}: {str(e)}"
+                        )
 
             else:
                 # If it's some unknown extension => mark failed or skip
-                log.warning(f"Skipping unsupported extension {extension} for {base_name}")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                log.warning(
+                    f"Skipping unsupported extension {extension} for {base_name}"
+                )
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 if os.path.exists(local_tmp_path):
                     os.remove(local_tmp_path)
 
@@ -312,22 +452,20 @@ def run_job():
         # Let's define an async function that handles them
         async def process_all_xlsx_tasks(xlsx_files):
             tasks = []
-            async with aiohttp.ClientSession() as session:
-                for (f_key, b_name, tmp_path, last_modified) in xlsx_files:
-                    tasks.append(
-                        process_xlsx_blob(
-                            session,
-                            f_key,
-                            b_name,
-                            tmp_path,
-                            project_id,
-                            data_source_id,
-                            sub_for_hash,
-                            sub_id
-                        )
+            for f_key, b_name, tmp_path, last_modified in xlsx_files:
+                tasks.append(
+                    process_xlsx_blob(
+                        f_key,
+                        b_name,
+                        tmp_path,
+                        project_id,
+                        data_source_id,
+                        sub_for_hash,
+                        sub_id,
                     )
-                # gather them all
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                )
+            # gather them all
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             return results
 
         if xlsx_tasks:
@@ -336,10 +474,16 @@ def run_job():
 
             # Now xlsx_results is a list of tuples => (final_status, usage_credits, error_msg)
             # in the same order as xlsx_tasks
-            for ((f_key, b_name, _, last_modified), (final_status, usage_credits, error_msg)) in zip(xlsx_tasks, xlsx_results):
+            for (f_key, b_name, _, last_modified), (
+                final_status,
+                usage_credits,
+                error_msg,
+            ) in zip(xlsx_tasks, xlsx_results):
                 now_dt = datetime.now(CENTRAL_TZ)
                 if final_status == "processed":
-                    psql.update_file_by_id(f_key, status="processed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        f_key, status="processed", updatedAt=now_dt.isoformat()
+                    )
                     # publish usage if usage_credits>0
                     if usage_credits > 0 and sub_id:
                         message = json.dumps(
@@ -355,24 +499,30 @@ def run_job():
                                 GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=message
                             )
                         except Exception as e:
-                            log.warning(f"Publish usage failed for XLSX file {b_name}: {str(e)}")
+                            log.warning(
+                                f"Publish usage failed for XLSX file {b_name}: {str(e)}"
+                            )
                 else:
                     # Mark failed
                     log.error(f"XLSX processing failed for {b_name}. {error_msg}")
-                    psql.update_file_by_id(f_key, status="failed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        f_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
 
         final_now_dt = datetime.now(CENTRAL_TZ)
         psql.update_data_source_by_id(
             data_source_id,
             status="processed",
             lastSyncTime=final_now_dt.isoformat(),
-            nextSyncTime=compute_next_sync_time(final_now_dt, ds.get("syncOption")).isoformat(),
+            nextSyncTime=compute_next_sync_time(
+                final_now_dt, ds.get("syncOption")
+            ).isoformat(),
         )
         return ("OK", 200)
 
     except Exception as e:
         log.exception("Error in Azure ingestion flow:")
-        psql.update_data_source_by_id(data_source_id, status="error")
+        psql.update_data_source_by_id(data_source_id, status="failed")
         return (str(e), 500)
 
 

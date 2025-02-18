@@ -2,6 +2,7 @@
 # s3_ingest.py
 
 import os
+import io
 import sys
 import json
 import signal
@@ -117,7 +118,7 @@ def run_job():
 
         if not (access_key and secret_key and bucket_name):
             log.error("Missing S3 credentials or bucket in ds record.")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("Missing S3 credentials/bucket", 400)
 
         # last sync time
@@ -195,7 +196,7 @@ def run_job():
 
         if not SERVER_URL:
             log.error("SERVER_URL is not set, cannot do Tika processing.")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("SERVER_URL missing", 500)
 
         try:
@@ -204,7 +205,7 @@ def run_job():
             ).json()["token"]
         except Exception as e:
             log.exception("Failed to obtain impersonated ID token:")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("Failed to get impersonated ID token", 500)
 
         headers = {
@@ -250,45 +251,158 @@ def run_job():
             extension = "pdf"
             if "." in s3key:
                 extension = s3key.rsplit(".", 1)[-1].lower()
-            local_path = os.path.join(UPLOADS_FOLDER, f"{file_key}.{extension}")
+            local_tmp_path = os.path.join(UPLOADS_FOLDER, f"{file_key}.{extension}")
 
             try:
-                download_s3_object(s3_client, bucket_name, s3key, local_path)
+                download_s3_object(s3_client, bucket_name, s3key, local_tmp_path)
             except Exception as e:
                 log.exception(f"Failed to download s3://{bucket_name}/{s3key}")
                 psql.update_file_by_id(file_key, status="failed")
                 continue
 
             # If XLSX, queue an async XLSX process (if you want S3 XLSX flow):
-            if extension == "xlsx":
-                xlsx_tasks.append((file_key, base_name, local_path, last_modified))
+            if extension in ["csv", "xls", "xltm", "xltx", "xlsx", "tsv", "ots"]:
+                xlsx_tasks.append((file_key, base_name, local_tmp_path, last_modified))
                 continue
 
-            # PDF / DOCX / PPTX flow:
-            def process_local_file(temp_path, file_ext):
-                if file_ext == "pdf":
-                    with open(temp_path, "rb") as f_in:
-                        pdf_data = f_in.read()
-                    return file_processor.split_pdf(pdf_data)
-                elif file_ext in ["docx", "pptx"]:
-                    pdf_data = convert_to_pdf(temp_path, file_ext)
-                    if pdf_data:
+            if extension in [
+                "pdf",
+                "docx",
+                "odt",
+                "odp",
+                "odg",
+                "odf",
+                "fodt",
+                "fodp",
+                "fodg",
+                "123",
+                "dbf",
+                "scm",
+                "dotx",
+                "docm",
+                "dotm",
+                "xml",
+                "doc",
+                "qpw",
+                "pptx",
+                "ppsx",
+                "ppmx",
+                "potx",
+                "pptm",
+                "ppam",
+                "ppsm",
+                "pptm",
+                "ppam",
+                "ppt",
+                "pps",
+                "ppt",
+                "ppa",
+                "rtf",
+                "jpg",
+                "jpeg",
+                "png",
+                "gif",
+                "tiff",
+                "bmp",
+                "eml",
+                "msg",
+                "pst",
+                "ost",
+                "mbox",
+                "dbx",
+                "dat",
+                "emlx",
+                "ods",
+            ]:
+
+                def process_local_file(temp_path, file_ext):
+                    if file_ext == "pdf":
+                        with open(temp_path, "rb") as f_in:
+                            pdf_data = f_in.read()
                         return file_processor.split_pdf(pdf_data)
-                    else:
-                        raise ValueError("Conversion to PDF failed.")
-                raise ValueError(f"Unsupported file format {file_ext} for S3 ingestion")
+                    elif file_ext in [
+                        "docx",
+                        "odt",
+                        "odp",
+                        "odg",
+                        "odf",
+                        "fodt",
+                        "fodp",
+                        "fodg",
+                        "123",
+                        "dbf",
+                        "scm",
+                        "dotx",
+                        "docm",
+                        "dotm",
+                        "xml",
+                        "doc",
+                        "qpw",
+                        "pptx",
+                        "ppsx",
+                        "ppmx",
+                        "potx",
+                        "pptm",
+                        "ppam",
+                        "ppsm",
+                        "pptm",
+                        "ppam",
+                        "ppt",
+                        "pps",
+                        "ppt",
+                        "ppa",
+                        "rtf",
+                    ]:
+                        pdf_data = convert_to_pdf(temp_path, file_ext)
+                        if pdf_data:
+                            return file_processor.split_pdf(pdf_data)
+                        else:
+                            raise ValueError("Conversion to PDF failed for Azure file.")
+                    elif extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
+                        # Treat as a single "page"
+                        with open(temp_path, "rb") as f:
+                            image_data = f.read()
+                        pages = [("1", io.BytesIO(image_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in [
+                        "eml",
+                        "msg",
+                        "pst",
+                        "ost",
+                        "mbox",
+                        "dbx",
+                        "dat",
+                        "emlx",
+                    ]:
+                        with open(temp_path, "rb") as f:
+                            msg_data = f.read()
+                        pages = [("1", io.BytesIO(msg_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in ["ods"]:
+                        with open(temp_path, "rb") as f:
+                            ods_data = f.read()
+                        pages = file_processor.split_ods(ods_data)
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    raise ValueError("Unsupported file format in Azure ingestion logic")
 
-            try:
-                final_pages, final_num_pages = process_local_file(local_path, extension)
-            except Exception as e:
-                log.error(f"Failed processing {base_name} as {extension}: {e}")
-                psql.update_file_by_id(file_key, status="failed")
-                if os.path.exists(local_path):
-                    os.remove(local_path)
-                continue
+                try:
+                    final_pages, final_num_pages = process_local_file(
+                        local_tmp_path, extension
+                    )
+                except Exception as e:
+                    log.error(f"Failed processing {base_name} as {extension}: {str(e)}")
+                    psql.update_file_by_id(
+                        file_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
+                    if os.path.exists(local_tmp_path):
+                        os.remove(local_tmp_path)
+                    continue
 
-            if os.path.exists(local_path):
-                os.remove(local_path)
+                if os.path.exists(local_tmp_path):
+                    os.remove(local_tmp_path)
 
             try:
                 results = loop.run_until_complete(
@@ -334,21 +448,19 @@ def run_job():
 
             async def process_all_xlsx_tasks(xlsx_files):
                 tasks = []
-                async with aiohttp.ClientSession() as session:
-                    for f_key, b_name, tmp_path, lm in xlsx_files:
-                        tasks.append(
-                            process_xlsx_blob(
-                                session,
-                                f_key,
-                                b_name,
-                                tmp_path,
-                                project_id,
-                                data_source_id,
-                                sub_for_hash,
-                                sub_id,
-                            )
+                for f_key, b_name, tmp_path, lm in xlsx_files:
+                    tasks.append(
+                        process_xlsx_blob(
+                            f_key,
+                            b_name,
+                            tmp_path,
+                            project_id,
+                            data_source_id,
+                            sub_for_hash,
+                            sub_id,
                         )
-                    return await asyncio.gather(*tasks, return_exceptions=True)
+                    )
+                return await asyncio.gather(*tasks, return_exceptions=True)
 
             xlsx_results = loop.run_until_complete(process_all_xlsx_tasks(xlsx_tasks))
 
@@ -397,7 +509,7 @@ def run_job():
 
     except Exception as e:
         log.exception("Error in S3 ingestion flow:")
-        psql.update_data_source_by_id(data_source_id, status="error")
+        psql.update_data_source_by_id(data_source_id, status="failed")
         return (str(e), 500)
 
 

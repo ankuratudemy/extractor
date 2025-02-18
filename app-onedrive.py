@@ -2,6 +2,7 @@
 # onedrive_ingest.py
 
 import os
+import io
 import sys
 import json
 import requests
@@ -32,8 +33,8 @@ from shared.common_code import (
     remove_file_from_db_and_pinecone,
     convert_to_pdf,
     process_pages_async,
-    process_xlsx_blob,   # <-- Import our XLSX helper
-    shutdown_handler,    # If you want to reuse the same signal handler
+    process_xlsx_blob,  # <-- Import our XLSX helper
+    shutdown_handler,  # If you want to reuse the same signal handler
 )
 
 ONEDRIVE_CLIENT_ID = os.environ.get("ONEDRIVE_CLIENT_ID")
@@ -59,12 +60,16 @@ def always_refresh_onedrive_token(ds):
     try:
         resp = requests.post(token_url, data=body_params)
         if not resp.ok:
-            log.error(f"[always_refresh_onedrive_token] Refresh request failed: {resp.text}")
+            log.error(
+                f"[always_refresh_onedrive_token] Refresh request failed: {resp.text}"
+            )
             return ds
         td = resp.json()
         new_access_token = td.get("access_token")
         if not new_access_token:
-            log.error(f"[always_refresh_onedrive_token] No access_token in response: {td}")
+            log.error(
+                f"[always_refresh_onedrive_token] No access_token in response: {td}"
+            )
             return ds
 
         expires_in = td.get("expires_in", 3920)
@@ -78,7 +83,9 @@ def always_refresh_onedrive_token(ds):
         )
         ds["oneDriveAccessToken"] = new_access_token
         ds["oneDriveExpiresAt"] = new_expires_str
-        log.info(f"[always_refresh_onedrive_token] Refreshed token for DS {ds['id']}, expiresAt={new_expires_dt}")
+        log.info(
+            f"[always_refresh_onedrive_token] Refreshed token for DS {ds['id']}, expiresAt={new_expires_dt}"
+        )
         return ds
     except Exception as e:
         log.exception("[always_refresh_onedrive_token] Error refreshing token for DS:")
@@ -122,7 +129,9 @@ def _list_all_onedrive_files_recursive(token: str, folder_id: str, ds) -> List[d
     return results
 
 
-def list_all_onedrive_files_recursively_with_retry(access_token: str, folder_id: str, ds) -> List[dict]:
+def list_all_onedrive_files_recursively_with_retry(
+    access_token: str, folder_id: str, ds
+) -> List[dict]:
     """
     Wraps the recursive listing and handles exceptions.
     """
@@ -181,7 +190,10 @@ def run_job():
             log.info(f"No DS found for id={data_source_id}")
             return (f"No DataSource found for id={data_source_id}", 404)
         if ds["sourceType"] != "oneDrive":
-            return (f"DataSource {data_source_id} is {ds['sourceType']}, not oneDrive.", 400)
+            return (
+                f"DataSource {data_source_id} is {ds['sourceType']}, not oneDrive.",
+                400,
+            )
 
         # 1) Refresh the OneDrive token
         ds = always_refresh_onedrive_token(ds)
@@ -207,10 +219,12 @@ def run_job():
 
         # 2) List files in OneDrive
         try:
-            od_files = list_all_onedrive_files_recursively_with_retry(access_token, folder_id, ds)
+            od_files = list_all_onedrive_files_recursively_with_retry(
+                access_token, folder_id, ds
+            )
         except Exception as e:
             log.exception("Failed listing files from OneDrive after token refresh:")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return (str(e), 500)
 
         log.info(f"Found {len(od_files)} total items in folder {folder_id}")
@@ -244,7 +258,9 @@ def run_job():
                 continue
 
             # derive unique file key
-            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, item_id)
+            file_key = generate_md5_hash(
+                sub_for_hash, project_id, data_source_id, item_id
+            )
             odFileId_to_key[item_id] = file_key
             od_file_keys.add(file_key)
 
@@ -253,7 +269,9 @@ def run_job():
             else:
                 if last_sync_dt:
                     try:
-                        item_modified_dt = ensure_timezone_aware(parser.isoparse(item_modified_time))
+                        item_modified_dt = ensure_timezone_aware(
+                            parser.isoparse(item_modified_time)
+                        )
                     except:
                         item_modified_dt = None
                     if item_modified_dt and item_modified_dt > last_sync_dt:
@@ -264,7 +282,9 @@ def run_job():
         removed_keys = db_file_keys - od_file_keys
         log.info(f"Removed keys => {removed_keys}")
         for r_key in removed_keys:
-            remove_file_from_db_and_pinecone(r_key, data_source_id, project_id, namespace=project_id)
+            remove_file_from_db_and_pinecone(
+                r_key, data_source_id, project_id, namespace=project_id
+            )
 
         log.info(f"New files => {len(new_files)}, Updated => {len(updated_files)}")
         to_process = new_files + updated_files
@@ -275,21 +295,25 @@ def run_job():
                 data_source_id,
                 status="processed",
                 lastSyncTime=now_dt.isoformat(),
-                nextSyncTime=compute_next_sync_time(now_dt, ds.get("syncOption")).isoformat(),
+                nextSyncTime=compute_next_sync_time(
+                    now_dt, ds.get("syncOption")
+                ).isoformat(),
             )
             return ("No new/updated files", 200)
 
         if not SERVER_URL:
             log.error("SERVER_URL not set => can't proceed with Tika.")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("No SERVER_URL", 500)
 
         # Get Bearer token for Tika server
         try:
-            bearer_token = google_auth.impersonated_id_token(serverurl=SERVER_DOMAIN).json()["token"]
+            bearer_token = google_auth.impersonated_id_token(
+                serverurl=SERVER_DOMAIN
+            ).json()["token"]
         except Exception as e:
             log.exception("Failed to obtain impersonated ID token for Tika:")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("Failed to get Tika token", 500)
 
         headers = {
@@ -329,19 +353,25 @@ def run_job():
                 )
                 db_file_keys_list.add(file_key)
             else:
-                psql.update_file_by_id(file_key, status="processing", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="processing", updatedAt=now_dt.isoformat()
+                )
 
             # Download from OneDrive
             try:
                 content_bytes = download_onedrive_file_content(access_token, item_id)
             except Exception as e:
                 log.exception(f"Failed to download {item_name} from OneDrive:")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             if not content_bytes:
                 log.error(f"Item {item_name} => empty or invalid content.")
-                psql.update_file_by_id(file_key, status="not supported", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="not supported", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             # Guess extension from item_name (or item['file']['mimeType'])
@@ -355,40 +385,155 @@ def run_job():
                     f.write(content_bytes)
             except Exception as e:
                 log.exception(f"Error writing OneDrive file {item_name} to disk:")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             # If it's XLSX, let's queue the parallel processing
-            if extension == "xlsx":
+            if extension in ["csv", "xls", "xltm", "xltx", "xlsx", "tsv", "ots"]:
                 # We'll skip immediate Tika flow; queue an async XLSX ingestion
                 xlsx_tasks.append((file_key, item_name, local_tmp_path, now_dt))
                 continue
 
-            # Otherwise proceed w/ PDF / docx / pptx flow:
-            def process_local_file(temp_path, file_ext):
-                if file_ext == "pdf":
-                    with open(temp_path, "rb") as f_in:
-                        pdf_data = f_in.read()
-                    return file_processor.split_pdf(pdf_data)
-                elif file_ext in ["docx", "pptx"]:
-                    pdf_data = convert_to_pdf(temp_path, file_ext)
-                    if pdf_data:
-                        return file_processor.split_pdf(pdf_data)
-                    else:
-                        raise ValueError("Conversion to PDF failed")
-                raise ValueError(f"Unsupported file format {file_ext} for OneDrive logic")
+            if extension in [
+                "pdf",
+                "docx",
+                "odt",
+                "odp",
+                "odg",
+                "odf",
+                "fodt",
+                "fodp",
+                "fodg",
+                "123",
+                "dbf",
+                "scm",
+                "dotx",
+                "docm",
+                "dotm",
+                "xml",
+                "doc",
+                "qpw",
+                "pptx",
+                "ppsx",
+                "ppmx",
+                "potx",
+                "pptm",
+                "ppam",
+                "ppsm",
+                "pptm",
+                "ppam",
+                "ppt",
+                "pps",
+                "ppt",
+                "ppa",
+                "rtf",
+                "jpg",
+                "jpeg",
+                "png",
+                "gif",
+                "tiff",
+                "bmp",
+                "eml",
+                "msg",
+                "pst",
+                "ost",
+                "mbox",
+                "dbx",
+                "dat",
+                "emlx",
+                "ods",
+            ]:
 
-            try:
-                final_pages, final_num_pages = process_local_file(local_tmp_path, extension)
-            except Exception as e:
-                log.error(f"Failed processing {item_name} => {extension}: {str(e)}")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                def process_local_file(temp_path, file_ext):
+                    if file_ext == "pdf":
+                        with open(temp_path, "rb") as f_in:
+                            pdf_data = f_in.read()
+                        return file_processor.split_pdf(pdf_data)
+                    elif file_ext in [
+                        "docx",
+                        "odt",
+                        "odp",
+                        "odg",
+                        "odf",
+                        "fodt",
+                        "fodp",
+                        "fodg",
+                        "123",
+                        "dbf",
+                        "scm",
+                        "dotx",
+                        "docm",
+                        "dotm",
+                        "xml",
+                        "doc",
+                        "qpw",
+                        "pptx",
+                        "ppsx",
+                        "ppmx",
+                        "potx",
+                        "pptm",
+                        "ppam",
+                        "ppsm",
+                        "pptm",
+                        "ppam",
+                        "ppt",
+                        "pps",
+                        "ppt",
+                        "ppa",
+                        "rtf",
+                    ]:
+                        pdf_data = convert_to_pdf(temp_path, file_ext)
+                        if pdf_data:
+                            return file_processor.split_pdf(pdf_data)
+                        else:
+                            raise ValueError("Conversion to PDF failed for Azure file.")
+                    elif extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
+                        # Treat as a single "page"
+                        with open(temp_path, "rb") as f:
+                            image_data = f.read()
+                        pages = [("1", io.BytesIO(image_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in [
+                        "eml",
+                        "msg",
+                        "pst",
+                        "ost",
+                        "mbox",
+                        "dbx",
+                        "dat",
+                        "emlx",
+                    ]:
+                        with open(temp_path, "rb") as f:
+                            msg_data = f.read()
+                        pages = [("1", io.BytesIO(msg_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in ["ods"]:
+                        with open(temp_path, "rb") as f:
+                            ods_data = f.read()
+                        pages = file_processor.split_ods(ods_data)
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    raise ValueError("Unsupported file format in Azure ingestion logic")
+
+                try:
+                    final_pages, final_num_pages = process_local_file(
+                        local_tmp_path, extension
+                    )
+                except Exception as e:
+                    log.error(f"Failed processing {item_name} as {extension}: {str(e)}")
+                    psql.update_file_by_id(
+                        file_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
+                    if os.path.exists(local_tmp_path):
+                        os.remove(local_tmp_path)
+                    continue
+
                 if os.path.exists(local_tmp_path):
                     os.remove(local_tmp_path)
-                continue
-
-            if os.path.exists(local_tmp_path):
-                os.remove(local_tmp_path)
 
             # Tika / embedding
             try:
@@ -401,12 +546,14 @@ def run_job():
                         file_key,
                         data_source_id,
                         last_modified=now_dt,  # or parse item_modified_time
-                        sourceType="oneDrive"
+                        sourceType="oneDrive",
                     )
                 )
             except Exception as e:
                 log.exception(f"Failed Tika/embedding step for {item_name}:")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             psql.update_file_by_id(
@@ -418,79 +565,100 @@ def run_job():
 
             used_credits = len(results) * 1.5
             if sub_id:
-                msg = json.dumps({
-                    "subscription_id": sub_id,
-                    "data_source_id": data_source_id,
-                    "project_id": project_id,
-                    "creditsUsed": used_credits
-                })
+                msg = json.dumps(
+                    {
+                        "subscription_id": sub_id,
+                        "data_source_id": data_source_id,
+                        "project_id": project_id,
+                        "creditsUsed": used_credits,
+                    }
+                )
                 try:
-                    google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg)
+                    google_pub_sub.publish_messages_with_retry_settings(
+                        GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg
+                    )
                 except Exception as e:
-                    log.warning(f"Publish usage failed for OneDrive file {item_name}: {e}")
+                    log.warning(
+                        f"Publish usage failed for OneDrive file {item_name}: {e}"
+                    )
 
         # Now handle XLSX tasks in parallel
         if xlsx_tasks:
-            log.info(f"Processing {len(xlsx_tasks)} XLSX files in parallel for OneDrive.")
+            log.info(
+                f"Processing {len(xlsx_tasks)} XLSX files in parallel for OneDrive."
+            )
 
             async def process_all_xlsx_tasks(xlsx_files):
                 tasks = []
-                async with aiohttp.ClientSession() as session:
-                    for (f_key, b_name, tmp_path, lm) in xlsx_files:
-                        tasks.append(
-                            process_xlsx_blob(
-                                session,
-                                f_key,
-                                b_name,
-                                tmp_path,
-                                project_id,
-                                data_source_id,
-                                sub_for_hash,
-                                sub_id
-                            )
+                for f_key, b_name, tmp_path, lm in xlsx_files:
+                    tasks.append(
+                        process_xlsx_blob(
+                            f_key,
+                            b_name,
+                            tmp_path,
+                            project_id,
+                            data_source_id,
+                            sub_for_hash,
+                            sub_id,
                         )
+                    )
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 return results
 
             xlsx_results = loop.run_until_complete(process_all_xlsx_tasks(xlsx_tasks))
 
             # xlsx_results => list of (final_status, usage_credits, error_msg)
-            for ((f_key, b_name, _, lm), (final_status, usage_credits, error_msg)) in zip(xlsx_tasks, xlsx_results):
+            for (f_key, b_name, _, lm), (final_status, usage_credits, error_msg) in zip(
+                xlsx_tasks, xlsx_results
+            ):
                 now_dt = datetime.now(CENTRAL_TZ)
                 if final_status == "processed":
-                    psql.update_file_by_id(f_key, status="processed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        f_key, status="processed", updatedAt=now_dt.isoformat()
+                    )
                     if usage_credits > 0 and sub_id:
-                        msg = json.dumps({
-                            "subscription_id": sub_id,
-                            "data_source_id": data_source_id,
-                            "project_id": project_id,
-                            "creditsUsed": usage_credits
-                        })
+                        msg = json.dumps(
+                            {
+                                "subscription_id": sub_id,
+                                "data_source_id": data_source_id,
+                                "project_id": project_id,
+                                "creditsUsed": usage_credits,
+                            }
+                        )
                         try:
-                            google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg)
+                            google_pub_sub.publish_messages_with_retry_settings(
+                                GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg
+                            )
                         except Exception as e:
-                            log.warning(f"Publish usage failed for XLSX file {b_name}: {e}")
+                            log.warning(
+                                f"Publish usage failed for XLSX file {b_name}: {e}"
+                            )
                 else:
                     log.error(f"XLSX processing failed for {b_name}. {error_msg}")
-                    psql.update_file_by_id(f_key, status="failed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        f_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
 
         final_now_dt = datetime.now(CENTRAL_TZ)
         psql.update_data_source_by_id(
             data_source_id,
             status="processed",
             lastSyncTime=final_now_dt.isoformat(),
-            nextSyncTime=compute_next_sync_time(final_now_dt, ds.get("syncOption")).isoformat(),
+            nextSyncTime=compute_next_sync_time(
+                final_now_dt, ds.get("syncOption")
+            ).isoformat(),
         )
         return ("OK", 200)
 
     except Exception as e:
         log.exception("Error in OneDrive ingestion flow:")
-        psql.update_data_source_by_id(data_source_id, status="error")
+        psql.update_data_source_by_id(data_source_id, status="failed")
         return (str(e), 500)
 
 
 if __name__ == "__main__":
     import signal
+
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
@@ -509,4 +677,5 @@ if __name__ == "__main__":
     run_job()
 else:
     import signal
+
     signal.signal(signal.SIGTERM, shutdown_handler)

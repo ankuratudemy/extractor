@@ -129,10 +129,10 @@ def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int = 3
     return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
 
 # ------------------------------------------------------------------
-# ASYNC BATCH FUNCTIONS (Your two)
+# ASYNC BATCH FUNCTIONS
 # ------------------------------------------------------------------
 async def create_and_upload_embeddings_in_batches(
-    results, filename, namespace, file_id, data_source_id, last_modified
+    results, filename, namespace, file_id, last_modified, data_source_id=None
 ):
     """
     results: list of (text, sub_index) for the entire sheet
@@ -144,7 +144,7 @@ async def create_and_upload_embeddings_in_batches(
         log.info("No text to process in create_and_upload_embeddings_in_batches.")
         return
 
-    # 1) Single-file (sheet) BM25 update
+    # 1) Single-file BM25 update
     sparse_values = get_sparse_vector(all_texts, namespace, 300)
 
     batch = []
@@ -199,17 +199,20 @@ async def process_embedding_batch(
     vectors = []
 
     for (chunk_text, sub_idx, chunk_idx), embedding in zip(batch, embeddings):
-        doc_id = f"{data_source_id}#{file_id}#{sub_idx}#{chunk_idx}"
+        if data_source_id:
+            doc_id = f"{data_source_id}#{file_id}#{sub_idx}#{chunk_idx}"
+        else:
+             doc_id = f"{file_id}#{sub_idx}#{chunk_idx}"
         metadata = {
             "text": chunk_text,
             "source": filename,
             "page": sub_idx,
-            "sourceType": "excelSheet",
-            "dataSourceId": data_source_id,
+            "sourceType": "excelSheet",  # you might want to rename this to 'spreadsheet'
             "fileId": file_id,
             "lastModified": (
                 last_modified.isoformat() if hasattr(last_modified, "isoformat") else str(last_modified)
             ),
+            **({"dataSourceId": data_source_id} if data_source_id is not None else {})
         }
         vectors.append(
             {
@@ -229,7 +232,7 @@ async def process_embedding_batch(
 
 
 # ------------------------------------------------------------------
-# EXCEL SHEET PROCESSING W/ LLM HEADERS
+# SHEET PROCESSING W/ LLM HEADERS
 # ------------------------------------------------------------------
 def clean_sheet_name(sheet_name):
     """Replace non-alphanumeric chars with underscores."""
@@ -249,12 +252,13 @@ def process_sheet_with_header_llm(sheet_name, df):
         sample_rows = min(math.ceil(len(df) * 0.1), 50)
         sample_df = df.head(sample_rows)
         sample_data_md = sample_df.to_markdown(index=False)  # markdown style
-        # System & question:
+
+        # System & question to LLM:
         system_instruction = (
             "You are a precise AI agent. Your task is to extract the header columns and any general info "
-            "above the headers in markdown format as a string from the sample Excel data."
+            "above the headers in markdown format as a string from the sample Excel (or CSV) data."
         )
-        question = f"EXCEL SAMPLE ROWS:\n\n{sample_data_md}\n\nJust produce the header columns + any data above header."
+        question = f"EXCEL/CSV SAMPLE ROWS:\n\n{sample_data_md}\n\nJust produce the header columns + any data above header."
 
         extracted_header = google_genai_client.models.generate_content(
             model="gemini-2.0-flash-exp",
@@ -264,12 +268,11 @@ def process_sheet_with_header_llm(sheet_name, df):
         header_text = extracted_header.text
 
         # 2) We'll create big ~2000 token chunks. Each chunk includes the `header_text` plus a batch of rows.
-        # Accumulate rows in a text block until we near ~2000 tokens.
         enc = tiktoken.get_encoding("cl100k_base")
         header_tokens = len(enc.encode(header_text))
-        max_tokens = 2000  # or some safe limit
+        max_tokens = 2000
 
-        # We'll collect row data in 'blocks' that, together with header_text, stay < max_tokens
+        # We'll collect row data in 'blocks' that, with header_text, stay < max_tokens
         chunks = []
         current_block_rows = []
         current_block_token_count = header_tokens
@@ -303,42 +306,68 @@ def process_sheet_with_header_llm(sheet_name, df):
         logging.error(get_traceback(e))
         return []
 
-def extract_excel_into_chunks(file_path):
+def load_spreadsheet_as_dict(file_path):
     """
-    Reads each sheet, uses LLM to generate 'header' plus row data,
-    splits into ~2000 token chunks, returns { sheet_name: [(chunk_text, idx), ...], ... }
+    1) Detect extension.
+    2) For CSV/TSV => load single DataFrame and store in a dict with "Sheet1".
+    3) For Excel-like files => pd.read_excel(sheet_name=None).
+    4) For .ots (ODF spreadsheet) => also read with the 'odf' engine if installed.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in [".csv", ".tsv"]:
+        sep = "\t" if ext == ".tsv" else ","
+        df = pd.read_csv(file_path, sep=sep, na_values="Missing")
+        return {"Sheet1": df}
+    elif ext in [".xls", ".xltm", ".xltx", ".xlsx"]:
+        # standard Excel engine
+        all_sheets = pd.read_excel(file_path, sheet_name=None, na_values="Missing")
+        return all_sheets
+    elif ext == ".ots":
+        # requires installing 'odfpy' or 'openpyxl' with ODF support
+        # engine="odf" might be required for OTS/ODS
+        all_sheets = pd.read_excel(file_path, sheet_name=None, na_values="Missing", engine="odf")
+        return all_sheets
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
+
+
+def extract_spreadsheet_into_chunks(file_path):
+    """
+    Reads the spreadsheet from `file_path`,
+    returns { sheet_name: [(chunk_text, idx), ...], ... }
+    (mimicking your original structure).
     """
     sheet_data = {}
     try:
-        # read all sheets
-        all_sheets = pd.read_excel(file_path, na_values="Missing", sheet_name=None)
+        all_sheets = load_spreadsheet_as_dict(file_path)
         for raw_name, df in all_sheets.items():
             sname = clean_sheet_name(raw_name)
             results = process_sheet_with_header_llm(sname, df)
             sheet_data[sname] = results
     except Exception as e:
-        logging.error(f"Error in extract_excel_into_chunks: {e}")
+        logging.error(f"Error in extract_spreadsheet_into_chunks: {e}")
         logging.error(get_traceback(e))
     return sheet_data
 
-
 # ------------------------------------------------------------------
-# MAIN XLSX INGEST FUNCTION
+# MAIN INGEST FUNCTION
 # ------------------------------------------------------------------
-def process_xlsx_file(xlsx_file, project_id, data_source_id, sub_id):
+def process_spreadsheet_file(uploaded_file, project_id, data_source_id, sub_id):
     """
     1) Save to /tmp
     2) For each sheet => produce chunked text (with LLM header)
     3) For each sheet => call 'create_and_upload_embeddings_in_batches' (async)
     4) Return overall stats
     """
-    tmp_path = os.path.join("/tmp", xlsx_file.filename)
-    xlsx_file.save(tmp_path)
-
-    file_id = generate_md5_hash(sub_id, project_id, data_source_id, xlsx_file.filename)
+    tmp_path = os.path.join("/tmp", uploaded_file.filename)
+    uploaded_file.save(tmp_path)
+    if data_source_id:
+        file_id = generate_md5_hash(sub_id, project_id, data_source_id, uploaded_file.filename)
+    else:
+        file_id = generate_md5_hash(sub_id, project_id, uploaded_file.filename)
 
     # Extract chunks per sheet
-    all_sheets_data = extract_excel_into_chunks(tmp_path)
+    all_sheets_data = extract_spreadsheet_into_chunks(tmp_path)
 
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
@@ -356,11 +385,11 @@ def process_xlsx_file(xlsx_file, project_id, data_source_id, sub_id):
         asyncio.run(
             create_and_upload_embeddings_in_batches(
                 results=results_list,
-                filename=f"{xlsx_file.filename}::{sheet_name}",
+                filename=f"{uploaded_file.filename}::{sheet_name}",
                 namespace=project_id,
                 file_id=file_id,
-                data_source_id=data_source_id,
                 last_modified=last_modified,
+                **({"data_source_id": data_source_id} if data_source_id is not None else {})
             )
         )
         total_sheets += 1
@@ -368,7 +397,7 @@ def process_xlsx_file(xlsx_file, project_id, data_source_id, sub_id):
 
     return {
         "status": "success",
-        "message": f"Processed file '{xlsx_file.filename}' with LLM-based header chunking.",
+        "message": f"Processed file '{uploaded_file.filename}' with LLM-based header chunking.",
         "sheets_processed": total_sheets,
         "chunks_processed": total_chunks,
     }
@@ -377,31 +406,32 @@ def process_xlsx_file(xlsx_file, project_id, data_source_id, sub_id):
 # ------------------------------------------------------------------
 # FLASK ENDPOINT
 # ------------------------------------------------------------------
-@app.route("/process_xlsx", methods=["POST"])
-def process_xlsx():
+@app.route("/process_spreadsheet", methods=["POST"])
+def process_spreadsheet():
     """
     Expects a multipart/form-data POST with:
-      - 'file' => XLSX
+      - 'file' => the spreadsheet-like file (csv, xlsx, etc.)
       - 'project_id'
-      - 'data_source_id'
+      - 'data_source_id' (optional)
       - 'sub_id'
     """
+    logging.info(f"Spreadsheet REQUEST# {request.files}")
     if "file" not in request.files:
         return jsonify({"error": "No file provided."}), 400
-    xlsx_file = request.files["file"]
+    uploaded_file = request.files["file"]
 
     project_id = request.form.get("project_id")
-    data_source_id = request.form.get("data_source_id")
+    data_source_id = request.form.get("data_source_id", None)
     sub_id = request.form.get("sub_id")
 
-    if not project_id or not data_source_id or not sub_id:
-        return jsonify({"error": "Missing project_id, data_source_id, or sub_id"}), 400
+    if not project_id or not sub_id:
+        return jsonify({"error": "Missing project_id or sub_id"}), 400
 
     try:
-        result = process_xlsx_file(xlsx_file, project_id, data_source_id, sub_id)
+        result = process_spreadsheet_file(uploaded_file, project_id, data_source_id, sub_id)
         return jsonify(result), 200
     except Exception as e:
-        logging.error(f"Error processing XLSX: {str(e)}")
+        logging.error(f"Error processing spreadsheet: {str(e)}")
         logging.error(get_traceback(e))
         return jsonify({"error": str(e)}), 500
 

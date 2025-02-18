@@ -2,13 +2,14 @@
 # sharepoint_ingest.py
 
 import os
+import io
 import sys
 import json
 import requests
 import asyncio
 import aiohttp
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import parser
 
 # Logging + Shared Imports
@@ -37,6 +38,7 @@ from shared.common_code import (
 SHAREPOINT_CLIENT_ID = os.environ.get("SHAREPOINT_CLIENT_ID")
 SHAREPOINT_CLIENT_SECRET = os.environ.get("SHAREPOINT_CLIENT_SECRET")
 
+
 def always_refresh_sharepoint_token(ds):
     refresh_token = ds.get("sharePointRefreshToken")
     if not refresh_token:
@@ -49,12 +51,14 @@ def always_refresh_sharepoint_token(ds):
         "client_secret": SHAREPOINT_CLIENT_SECRET,
         "refresh_token": refresh_token,
         "grant_type": "refresh_token",
-        "scope": "https://graph.microsoft.com/.default offline_access"
+        "scope": "https://graph.microsoft.com/.default offline_access",
     }
     try:
         resp = requests.post(token_url, data=body_params)
         if not resp.ok:
-            log.error(f"[always_refresh_sharepoint_token] Refresh request failed: {resp.text}")
+            log.error(
+                f"[always_refresh_sharepoint_token] Refresh request failed: {resp.text}"
+            )
             return ds
         td = resp.json()
         new_access_token = td.get("access_token")
@@ -79,6 +83,7 @@ def always_refresh_sharepoint_token(ds):
         log.exception("[always_refresh_sharepoint_token] Error refreshing token:")
         return ds
 
+
 def run_job():
     data_source_config = os.environ.get("DATA_SOURCE_CONFIG")
     if not data_source_config:
@@ -102,25 +107,25 @@ def run_job():
         ds = psql.get_data_source_details(data_source_id)
         if not ds:
             log.error(f"No DS found for id={data_source_id}")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             sys.exit("DS not found")
 
         if ds.get("sourceType") != "sharepoint":
             log.error(f"DS {data_source_id} is {ds.get('sourceType')}, not sharepoint.")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             sys.exit("Invalid data source type")
 
         ds = always_refresh_sharepoint_token(ds)
         access_token = ds.get("sharePointAccessToken")
         if not access_token:
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             sys.exit("No valid sharePointAccessToken after refresh")
 
         site_id = ds.get("sharePointSiteId")
         list_id = ds.get("sharePointListId")
         folder_id = ds.get("sharePointFolderId")
         if not site_id or not (list_id or folder_id):
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             sys.exit("Missing site_id or list/folder ID")
 
         last_sync_time = ds.get("lastSyncTime") or event_data.get("lastSyncTime")
@@ -135,6 +140,7 @@ def run_job():
 
         # List files
         from shared.sharepoint_helpers import list_all_sharepoint_files_fallback
+
         is_list = bool(list_id)
         list_or_folder_id = list_id if is_list else folder_id
         try:
@@ -143,7 +149,7 @@ def run_job():
             )
         except Exception as e:
             log.exception("Failed listing files from SharePoint:")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return (str(e), 500)
 
         existing_files = psql.fetch_files_by_data_source_id(data_source_id)
@@ -170,7 +176,9 @@ def run_job():
             if item_folder:
                 continue
 
-            file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, item_id)
+            file_key = generate_md5_hash(
+                sub_for_hash, project_id, data_source_id, item_id
+            )
             sharepoint_file_keys.add(file_key)
             spFileId_to_key[item_id] = file_key
 
@@ -179,7 +187,9 @@ def run_job():
             else:
                 if last_sync_dt and item_modified_time:
                     try:
-                        item_modified_dt = ensure_timezone_aware(parser.isoparse(item_modified_time))
+                        item_modified_dt = ensure_timezone_aware(
+                            parser.isoparse(item_modified_time)
+                        )
                     except:
                         item_modified_dt = None
                     if item_modified_dt and item_modified_dt > last_sync_dt:
@@ -189,7 +199,9 @@ def run_job():
 
         removed_keys = db_file_keys - sharepoint_file_keys
         for r_key in removed_keys:
-            remove_file_from_db_and_pinecone(r_key, data_source_id, project_id, project_id)
+            remove_file_from_db_and_pinecone(
+                r_key, data_source_id, project_id, project_id
+            )
 
         to_process = new_files + updated_files
         if not to_process:
@@ -198,20 +210,24 @@ def run_job():
                 data_source_id,
                 status="processed",
                 lastSyncTime=now_dt.isoformat(),
-                nextSyncTime=compute_next_sync_time(now_dt, ds.get("syncOption")).isoformat(),
+                nextSyncTime=compute_next_sync_time(
+                    now_dt, ds.get("syncOption")
+                ).isoformat(),
             )
             return ("No new/updated files", 200)
 
         if not SERVER_URL:
             log.error("SERVER_URL not set => can't proceed with Tika.")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("No SERVER_URL", 500)
 
         try:
-            bearer_token = google_auth.impersonated_id_token(serverurl=SERVER_DOMAIN).json()["token"]
+            bearer_token = google_auth.impersonated_id_token(
+                serverurl=SERVER_DOMAIN
+            ).json()["token"]
         except Exception as e:
             log.exception("Failed to obtain impersonated ID token for Tika:")
-            psql.update_data_source_by_id(data_source_id, status="error")
+            psql.update_data_source_by_id(data_source_id, status="failed")
             return ("Failed to get Tika token", 500)
 
         headers = {
@@ -249,22 +265,29 @@ def run_job():
                 )
                 db_file_keys_list.add(file_key)
             else:
-                psql.update_file_by_id(file_key, status="processing", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="processing", updatedAt=now_dt.isoformat()
+                )
 
             # Download
             from shared.sharepoint_helpers import download_file_with_fallback
+
             try:
                 content_bytes = download_file_with_fallback(
                     access_token, site_id, item_id, list_or_folder_id
                 )
             except Exception as e:
                 log.exception(f"Failed to download {item_name} from SharePoint:")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             if not content_bytes:
                 log.error(f"Item {item_name} => empty or invalid content.")
-                psql.update_file_by_id(file_key, status="not supported", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="not supported", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             # Guess extension
@@ -272,44 +295,159 @@ def run_job():
             if "." in item_name:
                 extension = item_name.rsplit(".", 1)[-1].lower()
 
-            local_path = os.path.join(UPLOADS_FOLDER, f"{file_key}.{extension}")
+            local_tmp_path = os.path.join(UPLOADS_FOLDER, f"{file_key}.{extension}")
             try:
-                with open(local_path, "wb") as f:
+                with open(local_tmp_path, "wb") as f:
                     f.write(content_bytes)
             except Exception as e:
                 log.exception(f"Error writing {item_name} to disk:")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
-            if extension == "xlsx":
-                xlsx_tasks.append((file_key, item_name, local_path, now_dt))
+            if extension in ["csv", "xls", "xltm", "xltx", "xlsx", "tsv", "ots"]:
+                xlsx_tasks.append((file_key, item_name, local_tmp_path, now_dt))
                 continue
 
-            # PDF/docx/pptx logic
-            def process_local_file(temp_path, file_ext):
-                if file_ext == "pdf":
-                    with open(temp_path, "rb") as f_in:
-                        pdf_data = f_in.read()
-                    return file_processor.split_pdf(pdf_data)
-                elif file_ext in ["docx", "pptx"]:
-                    pdf_data = convert_to_pdf(temp_path, file_ext)
-                    if pdf_data:
+            if extension in [
+                "pdf",
+                "docx",
+                "odt",
+                "odp",
+                "odg",
+                "odf",
+                "fodt",
+                "fodp",
+                "fodg",
+                "123",
+                "dbf",
+                "scm",
+                "dotx",
+                "docm",
+                "dotm",
+                "xml",
+                "doc",
+                "qpw",
+                "pptx",
+                "ppsx",
+                "ppmx",
+                "potx",
+                "pptm",
+                "ppam",
+                "ppsm",
+                "pptm",
+                "ppam",
+                "ppt",
+                "pps",
+                "ppt",
+                "ppa",
+                "rtf",
+                "jpg",
+                "jpeg",
+                "png",
+                "gif",
+                "tiff",
+                "bmp",
+                "eml",
+                "msg",
+                "pst",
+                "ost",
+                "mbox",
+                "dbx",
+                "dat",
+                "emlx",
+                "ods",
+            ]:
+
+                def process_local_file(temp_path, file_ext):
+                    if file_ext == "pdf":
+                        with open(temp_path, "rb") as f_in:
+                            pdf_data = f_in.read()
                         return file_processor.split_pdf(pdf_data)
-                    else:
-                        raise ValueError("Conversion to PDF failed.")
-                raise ValueError(f"Unsupported file format {file_ext} in SharePoint logic")
+                    elif file_ext in [
+                        "docx",
+                        "odt",
+                        "odp",
+                        "odg",
+                        "odf",
+                        "fodt",
+                        "fodp",
+                        "fodg",
+                        "123",
+                        "dbf",
+                        "scm",
+                        "dotx",
+                        "docm",
+                        "dotm",
+                        "xml",
+                        "doc",
+                        "qpw",
+                        "pptx",
+                        "ppsx",
+                        "ppmx",
+                        "potx",
+                        "pptm",
+                        "ppam",
+                        "ppsm",
+                        "pptm",
+                        "ppam",
+                        "ppt",
+                        "pps",
+                        "ppt",
+                        "ppa",
+                        "rtf",
+                    ]:
+                        pdf_data = convert_to_pdf(temp_path, file_ext)
+                        if pdf_data:
+                            return file_processor.split_pdf(pdf_data)
+                        else:
+                            raise ValueError("Conversion to PDF failed for Azure file.")
+                    elif extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
+                        # Treat as a single "page"
+                        with open(temp_path, "rb") as f:
+                            image_data = f.read()
+                        pages = [("1", io.BytesIO(image_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in [
+                        "eml",
+                        "msg",
+                        "pst",
+                        "ost",
+                        "mbox",
+                        "dbx",
+                        "dat",
+                        "emlx",
+                    ]:
+                        with open(temp_path, "rb") as f:
+                            msg_data = f.read()
+                        pages = [("1", io.BytesIO(msg_data))]
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    elif extension in ["ods"]:
+                        with open(temp_path, "rb") as f:
+                            ods_data = f.read()
+                        pages = file_processor.split_ods(ods_data)
+                        num_pages = len(pages)
+                        return pages, num_pages
+                    raise ValueError("Unsupported file format in Azure ingestion logic")
 
-            try:
-                final_pages, final_num_pages = process_local_file(local_path, extension)
-            except Exception as e:
-                log.error(f"Failed processing {item_name} => {extension}: {e}")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
-                if os.path.exists(local_path):
-                    os.remove(local_path)
-                continue
+                try:
+                    final_pages, final_num_pages = process_local_file(
+                        local_tmp_path, extension
+                    )
+                except Exception as e:
+                    log.error(f"Failed processing {item_name} as {extension}: {str(e)}")
+                    psql.update_file_by_id(
+                        file_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
+                    if os.path.exists(local_tmp_path):
+                        os.remove(local_tmp_path)
+                    continue
 
-            if os.path.exists(local_path):
-                os.remove(local_path)
+                if os.path.exists(local_tmp_path):
+                    os.remove(local_tmp_path)
 
             # Tika
             try:
@@ -322,85 +460,112 @@ def run_job():
                         file_key,
                         data_source_id,
                         last_modified=now_dt,
-                        sourceType="sharepoint"
+                        sourceType="sharepoint",
                     )
                 )
             except Exception as e:
                 log.exception(f"Failed Tika/embedding for {item_name}:")
-                psql.update_file_by_id(file_key, status="failed", updatedAt=now_dt.isoformat())
+                psql.update_file_by_id(
+                    file_key, status="failed", updatedAt=now_dt.isoformat()
+                )
                 continue
 
             psql.update_file_by_id(file_key, status="processed", pageCount=len(results))
 
             used_credits = len(results) * 1.5
             if sub_id:
-                msg = json.dumps({
-                    "subscription_id": sub_id,
-                    "data_source_id": data_source_id,
-                    "project_id": project_id,
-                    "creditsUsed": used_credits
-                })
+                msg = json.dumps(
+                    {
+                        "subscription_id": sub_id,
+                        "data_source_id": data_source_id,
+                        "project_id": project_id,
+                        "creditsUsed": used_credits,
+                    }
+                )
                 try:
-                    google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg)
+                    google_pub_sub.publish_messages_with_retry_settings(
+                        GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg
+                    )
                 except Exception as e:
-                    log.warning(f"Publish usage failed for SharePoint file {item_name}: {e}")
+                    log.warning(
+                        f"Publish usage failed for SharePoint file {item_name}: {e}"
+                    )
 
         # XLSX parallel
         if xlsx_tasks:
-            log.info(f"Processing {len(xlsx_tasks)} XLSX files in parallel for SharePoint.")
+            log.info(
+                f"Processing {len(xlsx_tasks)} XLSX files in parallel for SharePoint."
+            )
+
             async def process_all_xlsx_tasks(xlsx_files):
                 tasks = []
-                async with aiohttp.ClientSession() as session:
-                    for (f_key, b_name, tmp_path, lm) in xlsx_files:
-                        tasks.append(process_xlsx_blob(
-                            session,
+                for f_key, b_name, tmp_path, lm in xlsx_files:
+                    tasks.append(
+                        process_xlsx_blob(
                             f_key,
                             b_name,
                             tmp_path,
                             project_id,
                             data_source_id,
                             sub_for_hash,
-                            sub_id
-                        ))
+                            sub_id,
+                        )
+                    )
                 return await asyncio.gather(*tasks, return_exceptions=True)
 
             xlsx_results = loop.run_until_complete(process_all_xlsx_tasks(xlsx_tasks))
 
-            for ((f_key, b_name, _, lm), (final_status, usage_credits, error_msg)) in zip(xlsx_tasks, xlsx_results):
+            for (f_key, b_name, _, lm), (final_status, usage_credits, error_msg) in zip(
+                xlsx_tasks, xlsx_results
+            ):
                 now_dt = datetime.now(CENTRAL_TZ)
                 if final_status == "processed":
-                    psql.update_file_by_id(f_key, status="processed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        f_key, status="processed", updatedAt=now_dt.isoformat()
+                    )
                     if usage_credits > 0 and sub_id:
-                        msg = json.dumps({
-                            "subscription_id": sub_id,
-                            "data_source_id": data_source_id,
-                            "project_id": project_id,
-                            "creditsUsed": usage_credits
-                        })
+                        msg = json.dumps(
+                            {
+                                "subscription_id": sub_id,
+                                "data_source_id": data_source_id,
+                                "project_id": project_id,
+                                "creditsUsed": usage_credits,
+                            }
+                        )
                         try:
-                            google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg)
+                            google_pub_sub.publish_messages_with_retry_settings(
+                                GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg
+                            )
                         except Exception as e:
-                            log.warning(f"Publish usage failed for XLSX file {b_name}: {e}")
+                            log.warning(
+                                f"Publish usage failed for XLSX file {b_name}: {e}"
+                            )
                 else:
                     log.error(f"XLSX processing failed for {b_name}. {error_msg}")
-                    psql.update_file_by_id(f_key, status="failed", updatedAt=now_dt.isoformat())
+                    psql.update_file_by_id(
+                        f_key, status="failed", updatedAt=now_dt.isoformat()
+                    )
 
         final_now_dt = datetime.now(CENTRAL_TZ)
         psql.update_data_source_by_id(
             data_source_id,
             status="processed",
             lastSyncTime=final_now_dt.isoformat(),
-            nextSyncTime=compute_next_sync_time(final_now_dt, ds.get("syncOption")).isoformat(),
+            nextSyncTime=compute_next_sync_time(
+                final_now_dt, ds.get("syncOption")
+            ).isoformat(),
         )
         return ("OK", 200)
 
     except Exception as e:
         log.exception("Error in SharePoint ingestion flow:")
-        psql.update_data_source_by_id(data_source_id, status="error")
+        psql.update_data_source_by_id(data_source_id, status="failed")
         return (str(e), 500)
+
 
 if __name__ == "__main__":
     import signal
+
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
@@ -418,4 +583,5 @@ if __name__ == "__main__":
     run_job()
 else:
     import signal
+
     signal.signal(signal.SIGTERM, shutdown_handler)

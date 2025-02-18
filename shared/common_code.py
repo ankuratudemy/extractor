@@ -1,10 +1,10 @@
-# BM25 + sparse vector utilities (with no spaCy usage)
 import os
 import io
 import ssl
 import sys
 import signal
 import json
+import traceback
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import hashlib
@@ -13,9 +13,9 @@ import aiohttp
 import tiktoken
 import subprocess
 from dateutil import parser
+from typing import List, Tuple
 from shared.logging_config import log
 from shared import psql, google_pub_sub, google_auth, file_processor
-from typing import List, Tuple
 from shared.bm25 import (
     tokenize_document,
     publish_partial_bm25_update,
@@ -42,13 +42,18 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME")
 
 # For XLSX processing via separate Flask API:
 XLSX_SERVER_URL = os.environ.get("XLSX_SERVER_URL", None)
-XLSX_SERVER_ENDPOINT = f"https://{XLSX_SERVER_URL}/process_xlsx"
+XLSX_SERVER_ENDPOINT = f"https://{XLSX_SERVER_URL}/process_spreadsheet"
 
+# Initialize Pinecone
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 
 
 def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
+    """
+    Convert the combined text of a document into a BM25 sparse vector for Pinecone,
+    which helps with hybrid search (dense + sparse).
+    """
     combined_text = " ".join(file_texts)
     tokens = tokenize_document(combined_text)
     publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
@@ -56,11 +61,11 @@ def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) ->
     return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
 
 
-
 def ensure_timezone_aware(dt):
     if dt and dt.tzinfo is None:
         return dt.replace(tzinfo=CENTRAL_TZ)
     return dt
+
 
 def get_event_loop():
     try:
@@ -69,6 +74,7 @@ def get_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop
+
 
 def generate_md5_hash(*args):
     serialized_args = [json.dumps(arg) for arg in args]
@@ -92,25 +98,32 @@ def compute_next_sync_time(from_date: datetime, sync_option: str = None) -> date
     else:
         return from_date + timedelta(hours=1)
 
+
 def remove_file_from_db_and_pinecone(file_id, ds_id, project_id, namespace):
+    """
+    Remove the file from the PostgreSQL database and also remove any vectors
+    in Pinecone that have the prefix ds_id#file_id#.
+    """
     vector_id_prefix = f"{ds_id}#{file_id}#"
     try:
         for ids in index.list(prefix=vector_id_prefix, namespace=namespace):
-            log.info(f"Azure Pinecone Ids to delete: {ids}")
+            log.info(f"Pinecone IDs to delete: {ids}")
             index.delete(ids=ids, namespace=namespace)
         log.info(f"Removed Pinecone vectors with prefix={vector_id_prefix}")
-    except Exception as e:
+    except Exception:
         log.exception(f"Error removing vector {vector_id_prefix} from Pinecone:")
 
     try:
         psql.delete_file_by_id(file_id)
         log.info(f"Removed DB File {file_id}")
-    except Exception as e:
+    except Exception:
         log.exception(f"Error removing DB File {file_id}:")
 
 
-
 def convert_to_pdf(file_path, file_extension):
+    """
+    Convert docx/pptx to PDF using LibreOffice, returning the PDF bytes.
+    """
     try:
         pdf_file_path = os.path.splitext(file_path)[0] + ".pdf"
         command = [
@@ -131,15 +144,19 @@ def convert_to_pdf(file_path, file_extension):
         else:
             log.error("PDF file not found after conversion.")
             return None
-    except subprocess.CalledProcessError as e:
-        log.error(f"Conversion to PDF failed: {str(e)}")
+    except subprocess.CalledProcessError:
+        log.exception("Conversion to PDF failed:")
         return None
-    except Exception as e:
-        log.error(f"Error during PDF conversion: {str(e)}")
+    except Exception:
+        log.exception("Error during PDF conversion:")
         return None
 
 
-async def _async_put_page(session, url, page_data, page_num, headers, max_retries=10):
+async def _async_put_page(session, url, page_data, page_num, headers, max_retries=5):
+    """
+    Upload a single PDF page (as BytesIO) to the Tika server, handle 429/5xx retries,
+    and return the extracted text.
+    """
     retries = 0
     while retries < max_retries:
         try:
@@ -150,29 +167,55 @@ async def _async_put_page(session, url, page_data, page_num, headers, max_retrie
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=300),
             ) as resp:
-                if resp.status == 429:
+                if resp.status == 429 or (500 <= resp.status < 600):
+                    # Retry on 429 or any 5xx
+                    log.warning(
+                        f"[Tika] Received status={resp.status} for page={page_num}. "
+                        f"Retry {retries+1}/{max_retries}..."
+                    )
                     retries += 1
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2 * retries)
                     continue
+                # If 2xx or 4xx other than 429, proceed
                 content = await resp.read()
                 text_content = content.decode("utf-8", errors="ignore")
-                log.info(f"Page {page_num} => {len(text_content)} chars.")
+                log.info(f"[Tika] Page {page_num} => {len(text_content)} chars extracted.")
                 return text_content, page_num
-        except (aiohttp.ClientError, ssl.SSLError, asyncio.TimeoutError) as e:
-            log.warning(
-                f"Error PUT page {page_num}: {str(e)}, retry {retries+1}/{max_retries}"
+
+        except (aiohttp.ClientError, ssl.SSLError, asyncio.TimeoutError):
+            log.exception(
+                f"[Tika] Error PUT page {page_num}, retry {retries+1}/{max_retries}:"
             )
             retries += 1
-            await asyncio.sleep(1)
-    raise RuntimeError(f"Failed after {max_retries} tries for page {page_num}")
+            await asyncio.sleep(2 * retries)
+
+    # If we get here, we exhausted our retries:
+    msg = f"[Tika] Failed to process page {page_num} after {max_retries} retries."
+    log.error(msg)
+    # Return something indicative
+    return "", page_num
+
 
 async def process_pages_async(
-    pages, headers, filename, namespace, file_id, data_source_id, last_modified, sourceType
+    pages,
+    headers,
+    filename,
+    namespace,
+    file_id,
+    data_source_id,
+    last_modified,
+    sourceType,
 ):
+    """
+    Sends each PDF page to Tika asynchronously for text extraction. Then,
+    after gathering all page texts, chunk them and upload to Pinecone.
+    """
     if not SERVER_URL:
         raise ValueError("SERVER_URL is not set, cannot call Tika.")
+
     url = SERVER_URL
-    log.info(f"Starting async Tika processing of {len(pages)} pages.")
+    log.info(f"Starting async Tika processing of {len(pages)} pages for {filename}.")
+
     async with aiohttp.ClientSession() as session:
         tasks = [
             _async_put_page(session, url, page_data, page_num, headers)
@@ -180,13 +223,18 @@ async def process_pages_async(
         ]
         results = await asyncio.gather(*tasks)
 
-    log.info("All pages extracted. Now chunk, embed, and upsert to Pinecone.")
+    log.info(f"[Tika] All pages extracted for {filename}. Now upserting embeddings.")
     await create_and_upload_embeddings_in_batches(
         results, filename, namespace, file_id, data_source_id, last_modified, sourceType
     )
     return results
 
+
 def chunk_text(text, max_tokens=2048, overlap_chars=2000):
+    """
+    Splits a single string into overlapping chunks based on a max token size.
+    Prevents losing semantic context from chunk to chunk.
+    """
     enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)
     token_count = len(tokens)
@@ -212,24 +260,42 @@ def chunk_text(text, max_tokens=2048, overlap_chars=2000):
         end = start + max_tokens
     return chunks
 
+
 async def process_embedding_batch(
-    batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values, sourceType
+    batch,
+    filename,
+    namespace,
+    file_id,
+    data_source_id,
+    last_modified,
+    sparse_values,
+    sourceType,
 ):
+    """
+    Sends a batch of chunked text to the embedding model, builds Pinecone
+    vectors, then upserts them.
+    """
     texts = [item[0] for item in batch]
     embeddings = await get_google_embedding(texts)
+
     vectors = []
     for (text, page_num, chunk_idx), embedding in zip(batch, embeddings):
-        doc_id = f"{data_source_id}#{file_id}#{page_num}#{chunk_idx}"
+        if data_source_id:
+            doc_id = f"{data_source_id}#{file_id}#{page_num}#{chunk_idx}"
+        else:
+            doc_id = f"{file_id}#{page_num}#{chunk_idx}"
         metadata = {
             "text": text,
             "source": filename,
             "page": page_num,
             "sourceType": sourceType,
-            "dataSourceId": data_source_id,
             "fileId": file_id,
             "lastModified": (
-                last_modified.isoformat() if hasattr(last_modified, "isoformat") else str(last_modified)
+                last_modified.isoformat()
+                if hasattr(last_modified, "isoformat")
+                else str(last_modified)
             ),
+            **({"dataSourceId": data_source_id} if data_source_id is not None else {})
         }
         vectors.append(
             {
@@ -240,10 +306,16 @@ async def process_embedding_batch(
             }
         )
 
-    log.info(f"Upserting {len(vectors)} vectors to Pinecone for file_id={file_id}")
+    log.info(f"[Embed] Upserting {len(vectors)} vectors for file_id={file_id}")
     index.upsert(vectors=vectors, namespace=namespace)
 
-async def get_google_embedding(queries, model_name="text-multilingual-embedding-preview-0409"):
+
+async def get_google_embedding(
+    queries, model_name="text-multilingual-embedding-preview-0409"
+):
+    """
+    Uses Vertex AI PaLM to generate embeddings for a list of text queries.
+    """
     model = TextEmbeddingModel.from_pretrained(model_name)
     embeddings_list = model.get_embeddings(texts=queries, auto_truncate=True)
     return [emb.values for emb in embeddings_list]
@@ -252,6 +324,10 @@ async def get_google_embedding(queries, model_name="text-multilingual-embedding-
 async def create_and_upload_embeddings_in_batches(
     results, filename, namespace, file_id, data_source_id, last_modified, sourceType
 ):
+    """
+    Takes raw extracted text from all pages, splits each text into chunks,
+    and sends them to process_embedding_batch in manageable batches.
+    """
     batch = []
     batch_token_count = 0
     batch_text_count = 0
@@ -269,134 +345,208 @@ async def create_and_upload_embeddings_in_batches(
         text_chunks = chunk_text(text, max_tokens=2048, overlap_chars=2000)
         for i, chunk in enumerate(text_chunks):
             chunk_token_len = len(enc.encode(chunk))
+
             # If adding this chunk exceeds any limit, process the current batch
-            if ((batch_text_count + 1) > max_batch_texts) or (batch_token_count + chunk_token_len > max_batch_tokens):
+            if ((batch_text_count + 1) > max_batch_texts) or (
+                batch_token_count + chunk_token_len > max_batch_tokens
+            ):
                 if batch:
                     await process_embedding_batch(
-                        batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values, sourceType
+                        batch,
+                        filename,
+                        namespace,
+                        file_id,
+                        data_source_id,
+                        last_modified,
+                        sparse_values,
+                        sourceType,
                     )
                     batch.clear()
                     batch_text_count = 0
                     batch_token_count = 0
 
-            if ((batch_text_count + 1) <= max_batch_texts) and ((batch_token_count + chunk_token_len) <= max_batch_tokens):
+            # Try to add current chunk
+            if ((batch_text_count + 1) <= max_batch_texts) and (
+                (batch_token_count + chunk_token_len) <= max_batch_tokens
+            ):
                 batch.append((chunk, page_num, i))
                 batch_text_count += 1
                 batch_token_count += chunk_token_len
             else:
-                log.warning("Chunk too large or logic error preventing batch addition.")
+                log.warning("[Embed] Chunk too large or logic error prevented batch addition.")
                 continue
 
+    # Flush any remaining chunk batch
     if batch:
         await process_embedding_batch(
-            batch, filename, namespace, file_id, data_source_id, last_modified, sparse_values, sourceType
+            batch,
+            filename,
+            namespace,
+            file_id,
+            data_source_id,
+            last_modified,
+            sparse_values,
+            sourceType,
         )
         batch.clear()
 
 
 # ----------------------------------------------------------------------------
-# NEW ASYNC XLSX HELPER => We'll do parallel calls to XLSX_SERVER_ENDPOINT
+# XLSX HELPER => We'll do parallel calls to XLSX_SERVER_ENDPOINT
 # ----------------------------------------------------------------------------
-async def _call_xlsx_endpoint(session, xlsx_flask_url, file_path, base_name, project_id, data_source_id, sub_for_hash):
+
+async def _call_xlsx_endpoint(
+    session,
+    xlsx_flask_url,
+    file_path,
+    base_name,
+    project_id,
+    data_source_id,
+    sub_for_hash,
+    max_retries=5,
+):
     """
     A helper that:
     1) Reads the XLSX from local disk
     2) Posts it to XLSX_SERVER_ENDPOINT
-    3) Returns (status_code, response_text or response_json)
+    3) Retries on 429 or 5xx, up to max_retries
+    4) Returns (status_code, response_text or response_json)
     """
-    # We'll set a large timeout if needed; or you can use custom handling.
-    timeout = aiohttp.ClientTimeout(total=3600)  # up to 1h for large XLSX
 
+    # Read file from disk
     with open(file_path, "rb") as f:
         file_content = f.read()
 
     data = {
         "project_id": project_id,
-        "data_source_id": data_source_id,
         "sub_id": sub_for_hash,
+        **({"dataSourceId": data_source_id} if data_source_id is not None else {})
     }
 
     form_data = aiohttp.FormData()
-    form_data.add_field("file", file_content, filename=base_name, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    form_data.add_field(
+        "file",
+        file_content,
+        filename=base_name,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     for k, v in data.items():
         form_data.add_field(k, v)
+
+    # Obtain a bearer token (outside the retry loop here, unless you need to refresh it each time)
     try:
         xlsx_bearer_token = google_auth.impersonated_id_token(serverurl=XLSX_SERVER_URL).json()["token"]
-    except Exception as e:
-        log.exception("Failed to obtain impersonated ID token:")
-        psql.update_data_source_by_id(
-            data_source_id, status="error", updatedAt=datetime.now(CENTRAL_TZ).isoformat()
-        )
-        return ("Failed to obtain impersonated ID token.", 500)
+    except Exception:
+        log.exception("[XLSX] Failed to obtain impersonated ID token:")
+        psql.update_data_source_by_id(data_source_id, status="failed")
+        return (500, "Failed to obtain impersonated ID token.")
 
     headers = {
         "Authorization": f"Bearer {xlsx_bearer_token}",
         "X-Tika-PDFOcrStrategy": "auto",
         "Accept": "text/plain",
     }
-    async with session.post(xlsx_flask_url, data=form_data,headers=headers, timeout=timeout) as resp:
-        status = resp.status
+
+    # Retry loop
+    attempts = 0
+    while attempts < max_retries:
         try:
-            js = await resp.json()
-        except:
-            js = await resp.text()
-        return (status, js)
+            async with session.post(xlsx_flask_url, data=form_data, headers=headers) as resp:
+                status = resp.status
+                try:
+                    js = await resp.json()
+                except:
+                    js = await resp.text()
+
+                if status == 429 or (500 <= status < 600):
+                    # Retry on 429 or 5xx
+                    log.warning(
+                        f"[XLSX] Received status={status} from XLSX server. "
+                        f"Retry {attempts+1}/{max_retries}..."
+                    )
+                    attempts += 1
+                    await asyncio.sleep(2 * attempts)
+                    continue
+
+                # Otherwise, return whatever we got (200, 201, 4xx except 429, etc.)
+                return (status, js)
+
+        except Exception:
+            # Log and retry
+            log.exception(
+                f"[XLSX] Exception while calling XLSX endpoint (attempt {attempts+1}/{max_retries}):"
+            )
+            attempts += 1
+            await asyncio.sleep(2 * attempts)
+
+    # If we get here, we've exceeded retries
+    msg = f"[XLSX] Max retries ({max_retries}) exceeded while posting XLSX file."
+    log.error(msg)
+    return (500, msg)
+
 
 async def process_xlsx_blob(
-    session,  # shared ClientSession
     file_key,
     base_name,
     local_tmp_path,
     project_id,
     data_source_id,
     sub_for_hash,
-    sub_id
+    sub_id,
 ):
     """
-    This function processes a single XLSX file in parallel:
-      1) Call the XLSX Flask endpoint
-      2) Return usage info or errors
+    High-level XLSX ingestion that opens a session and calls _call_xlsx_endpoint,
+    returning final status/credits/error_msg.
     """
-    # We'll default to "failed" unless we get a 200
     final_status = "failed"
     usage_credits = 0
     error_msg = ""
 
-    # Attempt the POST
-    xlsx_flask_url = XLSX_SERVER_ENDPOINT  # global var
-    try:
-        # Call the XLSX endpoint
-        status_code, response_data = await _call_xlsx_endpoint(
-            session,
-            xlsx_flask_url,
-            local_tmp_path,
-            base_name,
-            project_id,
-            data_source_id,
-            sub_for_hash
+    xlsx_flask_url = XLSX_SERVER_ENDPOINT
+
+    # Create a brand new session each time we process a single XLSX
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(
+            total=3600,      # Total timeout for entire operation
+            sock_read=3600,  # Specifically set read timeout
+            connect=30,      # Time to connect to server
+            sock_connect=30, # Time to connect socket
         )
+    ) as session:
+        try:
+            status_code, response_data = await _call_xlsx_endpoint(
+                session,
+                xlsx_flask_url,
+                local_tmp_path,
+                base_name,
+                project_id,
+                data_source_id,
+                sub_for_hash,
+                max_retries=5,
+            )
 
-        if os.path.exists(local_tmp_path):
-            os.remove(local_tmp_path)
+            # Clean up local file if it exists
+            if os.path.exists(local_tmp_path):
+                os.remove(local_tmp_path)
 
-        if status_code == 200:
-            final_status = "processed"
-            # parse usage if we want
-            if isinstance(response_data, dict):
-                usage_credits = response_data.get("chunks_processed", 0) * 1.5
+            if status_code == 200:
+                final_status = "processed"
+                if isinstance(response_data, dict):
+                    usage_credits = response_data.get("chunks_processed", 0) * 1.5
+                else:
+                    usage_credits = 0
             else:
-                # if the response is text instead of JSON
-                usage_credits = 0
-        else:
-            # keep final_status = "failed"
-            error_msg = f"XLSX ingest error: status={status_code}, resp={response_data}"
+                error_msg = f"[XLSX] Ingest error: status={status_code}, resp={response_data}"
 
-    except Exception as e:
-        if os.path.exists(local_tmp_path):
-            os.remove(local_tmp_path)
-        error_msg = f"Exception calling XLSX ingestion: {str(e)}"
+        except Exception:
+            # Log full traceback
+            log.exception("[XLSX] Exception calling XLSX ingestion:")
+            if os.path.exists(local_tmp_path):
+                os.remove(local_tmp_path)
+            error_msg = "Exception calling XLSX ingestion (see logs for traceback)."
 
-    return final_status, usage_credits, error_msg
+    # session closes automatically here
+    return (final_status, usage_credits, error_msg)
 
 
 def shutdown_handler(sig, frame):
