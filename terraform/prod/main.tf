@@ -6,7 +6,7 @@ provider "google" {
 
 
 variable "environment" {
-  description = "Environment: 'stage'"
+  description = "Environment: 'prod'"
   type        = string
   default     = "stage"
 }
@@ -53,17 +53,17 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  xlsx_image                            = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:7.0.0"
+  xlsx_image                            = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:15.0.0"
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-271.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:61.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:69.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer-26.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:34.0.0"
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
-  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer-9.0.0"
-  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer-10.0.0"
-  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer-16.0.0"
-  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer-7.0.0"
-  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer-13.0.0"
+  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:15.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:16.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:23.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:17.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:24.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -861,6 +861,10 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
         value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
       }
       env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
       }
@@ -1538,7 +1542,6 @@ resource "google_cloud_run_v2_job" "gdrive_cloud_run_job" {
 
   # Name your job. You can tweak this however you like.
   name                = "gdrive-job${local.indexer_domain_suffix}-${each.key}"
-
   location            = each.key
 
   template {
@@ -1553,6 +1556,10 @@ resource "google_cloud_run_v2_job" "gdrive_cloud_run_job" {
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -1854,7 +1861,6 @@ resource "google_cloud_run_v2_job" "onedrive_cloud_run_job" {
   for_each = toset(local.us_regions)
 
   name                = "onedrive-job${local.indexer_domain_suffix}-${each.key}"
-
   location            = each.key
 
   template {
@@ -1869,6 +1875,10 @@ resource "google_cloud_run_v2_job" "onedrive_cloud_run_job" {
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -2165,7 +2175,6 @@ resource "google_cloud_run_v2_job" "sharepoint_cloud_run_job" {
   for_each = toset(local.us_regions)
 
   name                = "sharepoint-job${local.indexer_domain_suffix}-${each.key}"
-
   location            = each.key
 
   template {
@@ -2180,6 +2189,10 @@ resource "google_cloud_run_v2_job" "sharepoint_cloud_run_job" {
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -2476,7 +2489,6 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
   for_each = toset(local.us_regions)
 
   name                = "s3-job${local.indexer_domain_suffix}-${each.key}"
-
   location            = each.key
 
   template {
@@ -2491,6 +2503,10 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -2769,6 +2785,10 @@ resource "google_cloud_run_v2_job" "gcpbucket_cloud_run_job" {
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
