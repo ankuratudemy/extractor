@@ -49,6 +49,19 @@ pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 
 
+def parse_last_sync_time(last_sync_time_value):
+    """
+    Safely parse a lastSyncTime value (string or datetime) into a timezone-aware datetime or return None.
+    """
+    if isinstance(last_sync_time_value, datetime):
+        return ensure_timezone_aware(last_sync_time_value)
+    if isinstance(last_sync_time_value, str):
+        try:
+            return ensure_timezone_aware(parser.isoparse(last_sync_time_value))
+        except:
+            return None
+    return None
+
 def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
     """
     Convert the combined text of a document into a BM25 sparse vector for Pinecone,
@@ -118,6 +131,15 @@ def remove_file_from_db_and_pinecone(file_id, ds_id, project_id, namespace):
         log.info(f"Removed DB File {file_id}")
     except Exception:
         log.exception(f"Error removing DB File {file_id}:")
+
+def remove_missing_files(db_file_keys, remote_file_keys, data_source_id, project_id, namespace=None):
+    """
+    Remove from DB and Pinecone any files that no longer exist in the remote source.
+    """
+    removed_keys = db_file_keys - remote_file_keys
+    log.info(f"Removed keys: {removed_keys}")
+    for r_key in removed_keys:
+        remove_file_from_db_and_pinecone(r_key, data_source_id, project_id, namespace=namespace or project_id)
 
 
 def convert_to_pdf(file_path, file_extension):
@@ -485,6 +507,47 @@ async def _call_xlsx_endpoint(
     return (500, msg)
 
 
+def fetch_tika_bearer_token():
+    """
+    Fetch a Bearer token from Google Auth for Tika usage.
+    Returns the token string, or raises an exception.
+    """
+    try:
+        token_json = google_auth.impersonated_id_token(serverurl=SERVER_DOMAIN).json()
+        return token_json["token"]
+    except Exception as exc:
+        log.exception("Failed to obtain impersonated ID token for Tika:")
+        raise
+
+async def handle_xlsx_blob_async(
+    file_key,
+    base_name,
+    local_tmp_path,
+    project_id,
+    data_source_id,
+    sub_for_hash,
+    sub_id
+):
+    """
+    Wraps your existing process_xlsx_blob call in an async context
+    so it can be used with asyncio.gather.
+    """
+    # This corresponds to your "process_xlsx_blob" from your code
+    # and returns (final_status, usage_credits, error_msg)
+    try:
+        return await process_xlsx_blob(
+            file_key,
+            base_name,
+            local_tmp_path,
+            project_id,
+            data_source_id,
+            sub_for_hash,
+            sub_id,
+        )
+    except Exception as e:
+        log.exception(f"[handle_xlsx_blob_async] XLSX processing error for {base_name}")
+        return ("failed", 0, str(e))
+    
 async def process_xlsx_blob(
     file_key,
     base_name,
@@ -548,6 +611,165 @@ async def process_xlsx_blob(
     # session closes automatically here
     return (final_status, usage_credits, error_msg)
 
+def finalize_data_source(data_source_id, ds, new_status="processed"):
+    """
+    Helper to finalize the data source after processing is done,
+    setting lastSyncTime and nextSyncTime, etc.
+    """
+    now_dt = datetime.now(CENTRAL_TZ)
+    next_sync = compute_next_sync_time(now_dt, ds.get("syncOption"))
+    psql.update_data_source_by_id(
+        data_source_id,
+        status=new_status,
+        lastSyncTime=now_dt.isoformat(),
+        nextSyncTime=next_sync.isoformat(),
+    )
+
+def determine_file_extension(filename, default_ext="pdf"):
+    """
+    Determine the file extension by looking at the filename.
+    If none found, return `default_ext`.
+    """
+    if "." in filename:
+        return filename.rsplit(".", 1)[-1].lower()
+    return default_ext
+
+
+def process_local_file(local_tmp_path, extension):
+    """
+    Convert/transform the file at local_tmp_path into a list of (pageNum, io.BytesIO) pages.
+    This function handles PDF, docx->PDF conversion, images as single-page, email formats, ODS, etc.
+    
+    Returns: (final_pages, final_num_pages)
+    """
+    # For PDF
+    if extension == "pdf":
+        with open(local_tmp_path, "rb") as f_in:
+            pdf_data = f_in.read()
+        return file_processor.split_pdf(pdf_data)
+
+    # Convert to PDF from docx/pptx/etc.
+    elif extension in [
+        "docx", "odt", "odp", "odg", "odf", "fodt", "fodp", "fodg",
+        "123", "dbf", "scm", "dotx", "docm", "dotm", "xml", "doc",
+        "qpw", "pptx", "ppsx", "ppmx", "potx", "pptm", "ppam", "ppsm",
+        "ppt", "pps", "ppa", "rtf"
+    ]:
+        pdf_data = convert_to_pdf(local_tmp_path, extension)
+        if pdf_data:
+            return file_processor.split_pdf(pdf_data)
+        else:
+            raise ValueError(f"Conversion to PDF failed for extension: {extension}")
+
+    # Images
+    elif extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
+        with open(local_tmp_path, "rb") as f:
+            image_data = f.read()
+        pages = [("1", io.BytesIO(image_data))]
+        return pages, len(pages)
+
+    # Email formats
+    elif extension in ["eml", "msg", "pst", "ost", "mbox", "dbx", "dat", "emlx"]:
+        with open(local_tmp_path, "rb") as f:
+            msg_data = f.read()
+        pages = [("1", io.BytesIO(msg_data))]
+        return pages, len(pages)
+
+    # ODS
+    elif extension == "ods":
+        with open(local_tmp_path, "rb") as f:
+            ods_data = f.read()
+        pages = file_processor.split_ods(ods_data)
+        return pages, len(pages)
+
+    # If none match
+    else:
+        raise ValueError(f"Unsupported file extension: {extension}")
+
+
+def process_file_with_tika(
+    file_key,
+    base_name,
+    local_tmp_path,
+    extension,
+    project_id,
+    data_source_id,
+    last_modified,
+    source_type,
+    sub_id
+):
+    """
+    Complete flow:
+      1. Convert/split local file into pages.
+      2. Send pages to Tika to extract text, embed them, etc. (process_pages_async).
+      3. Update DB with status and usage.
+      4. Return (final_status, number_of_pages, error_msg).
+    """
+    from .common_code import fetch_tika_bearer_token
+
+    now_dt_str = datetime.now(CENTRAL_TZ).isoformat()
+    try:
+        final_pages, final_num_pages = process_local_file(local_tmp_path, extension)
+    except Exception as e:
+        log.error(f"[process_file_with_tika] Failed to process/convert {base_name}: {str(e)}")
+        return ("failed", 0, str(e))
+
+    # Remove the local file if you wish
+    if os.path.exists(local_tmp_path):
+        os.remove(local_tmp_path)
+
+    # Get Tika token
+    try:
+        bearer_token = fetch_tika_bearer_token()
+    except Exception as e:
+        return ("failed", 0, f"Failed to fetch Tika token: {str(e)}")
+
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "X-Tika-PDFOcrStrategy": "auto",
+        "Accept": "text/plain",
+    }
+
+    loop = get_event_loop()
+    try:
+        results = loop.run_until_complete(
+            process_pages_async(
+                final_pages,
+                headers,
+                base_name,
+                project_id,
+                file_key,
+                data_source_id,
+                last_modified=last_modified,
+                sourceType=source_type,
+            )
+        )
+    except Exception as e:
+        log.exception(f"[process_file_with_tika] Tika/embedding failed for {base_name}:")
+        return ("failed", 0, str(e))
+
+    # Mark processed in DB
+    psql.update_file_by_id(file_key, status="processed", pageCount=len(results), updatedAt=now_dt_str)
+
+    # Publish usage
+    used_credits = len(results) * 1.5
+    if sub_id:
+        msg = json.dumps(
+            {
+                "subscription_id": sub_id,
+                "data_source_id": data_source_id,
+                "project_id": project_id,
+                "creditsUsed": used_credits,
+            }
+        )
+        try:
+            google_pub_sub.publish_messages_with_retry_settings(
+                GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=msg
+            )
+        except Exception as e:
+            log.warning(f"[process_file_with_tika] Publish usage failed for {base_name}: {str(e)}")
+
+    return ("processed", len(results), "")
 
 def shutdown_handler(sig, frame):
     log.info(f"Caught signal {signal.strsignal(sig)}. Exiting.")
