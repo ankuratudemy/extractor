@@ -1,0 +1,71 @@
+# Use the official Python image as the base image
+FROM python:3.10-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install Java, wget, and SSL dependencies (and everything else you need)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    poppler-utils \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    wget \
+    ca-certificates \
+    openssl \
+    apt-transport-https \
+    unoconv \
+    fontconfig \
+    software-properties-common \
+    libxinerama1 \
+    ibus
+
+# Copy requirements and install
+COPY requirements-confluence.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create a new directory called "uploads"
+RUN mkdir /app/uploads
+
+# Add bookworm contrib sources (needed for MS fonts, etc.)
+RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list && \
+    echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+
+RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer
+
+# Copy your custom fonts into the container
+COPY /fonts/* /usr/share/fonts
+RUN ls -ltr /usr/share/fonts
+RUN fc-cache -f -v
+RUN fc-list
+
+# Install Tesseract extras, more fonts, etc., then clean up
+RUN apt-get install --yes --no-install-recommends tesseract-ocr-all && \
+    echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        xfonts-utils \
+        fonts-freefont-ttf \
+        fonts-liberation \
+        fonts-indic \
+        fonts-beng \
+        ttf-mscorefonts-installer \
+        wget \
+        cabextract && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Copy shared code, service account key, and your main app
+COPY ./shared /app/shared
+COPY ./SAKeys/fe-key.json key.json
+COPY app-confluence.py app.py
+
+# Rebuild font cache (just in case)
+RUN fc-cache -f -v
+
+# Tell Python where to find your service account credentials
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/key.json
+
+# For Cloud Run JOB, we typically do NOT EXPOSE a port
+
+# In a Cloud Run Job, you typically just run your script once:
+CMD ["python", "app.py"]

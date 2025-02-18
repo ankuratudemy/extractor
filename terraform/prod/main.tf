@@ -4,33 +4,66 @@ provider "google" {
   region  = "us-central1"
 }
 
+
 variable "environment" {
   description = "Environment: 'prod'"
   type        = string
-  default     = "prod"
+  default     = "stage"
 }
 
 locals {
   environment                          = var.environment # Set the desired environment here
   us_regions                           = ["us-central1"]
-  regions                              = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"] : ["northamerica-northeast1", "northamerica-northeast2"]
-  fe_cpu                               = 1
+  regions                              = var.environment == "prod" ? ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"] : ["northamerica-northeast1", "northamerica-northeast2", "us-central1", "us-east4", "us-east1", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1", "asia-south1", "asia-south2", "europe-west1", "europe-west2", "europe-west3", "europe-west4", "australia-southeast1", "asia-southeast1", "asia-east1"]
+  fe_cpu                               = 2
   fe_memory                            = "2Gi"
   fe_port                              = 5000
   be_cpu                               = 1
   be_memory                            = "2Gi"
   be_port                              = 9998
+  xlsx_cpu                             = 1
+  xlsx_memory                          = "2Gi"
+  xlsx_port                            = 9999
   indexer_cpu                          = 1
   indexer_memory                       = "2Gi"
   indexer_port                         = 5000
   searxng_port                         = 8080
+  confluence_cpu                       = 1
+  confluence_memory                    = "2Gi"
+  confluence_port                      = 5000
+  gdrive_cpu                           = 1
+  gdrive_memory                        = "2Gi"
+  gdrive_port                          = 5000
+  azureblob_cpu                        = 1
+  azureblob_memory                     = "2Gi"
+  azureblob_port                       = 5000
+  s3_cpu                               = 1
+  s3_memory                            = "2Gi"
+  s3_port                              = 5000
+  gcpbucket_cpu                        = 1
+  gcpbucket_memory                     = "2Gi"
+  gcpbucket_port                       = 5000
+  onedrive_cpu                         = 1
+  onedrive_memory                      = "2Gi"
+  onedrive_port                        = 5000
+  sharepoint_cpu                       = 1
+  sharepoint_memory                    = "2Gi"
+  sharepoint_port                      = 5000
   external_ip_address_name_fe          = "xtract-fe-ip-name"
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-213.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:22.0.0"
+  xlsx_image                            = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:15.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-271.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:69.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:34.0.0"
+  confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
+  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:15.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:16.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:23.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:17.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:24.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -39,28 +72,28 @@ locals {
   fe_service_name_prefix               = "xtract-fe"
   indexer_service_name_prefix          = "xtract-indexer"
   be_service_name_prefix               = "xtract-be"
+  xlsx_service_name_prefix             = "xlsx-be"
   fe_hc_path                           = "/health"
   be_hc_path                           = "/tika"
   fe_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   indexer_domain_suffix                = local.environment == "prod" ? "" : "-stage"
   be_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   websearch_domain_suffix              = local.environment == "prod" ? "" : "-stage"
+  xlsx_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
 
   region_instance_counts = {
     "northamerica-northeast1" = {
-      fe_max_inst      = local.environment == "prod" ? 1000 : 1
+      fe_max_inst      = local.environment == "prod" ? 1000 : 1000
       fe_min_inst      = 0
-      indexer_max_inst = local.environment == "prod" ? 1000 : 1
+      indexer_max_inst = local.environment == "prod" ? 1000 : 1000
       indexer_min_inst = 0
-      be_max_inst      = local.environment == "prod" ? 1000 : 10
+      be_max_inst      = local.environment == "prod" ? 1000 : 1000
       be_min_inst      = 0
     }
     "northamerica-northeast2" = {
-      fe_max_inst      = local.environment == "prod" ? 1000 : 1
+      fe_max_inst      = local.environment == "prod" ? 500 : 500
       fe_min_inst      = 0
-      indexer_max_inst = local.environment == "prod" ? 1000 : 1
-      indexer_min_inst = 0
-      be_max_inst      = local.environment == "prod" ? 1000 : 10
+      be_max_inst      = local.environment == "prod" ? 500 : 500
       be_min_inst      = 0
     }
     "us-central1" = {
@@ -217,26 +250,16 @@ locals {
     }
   }
 }
-# Ran only once to create terraform state buckets
-# resource "google_storage_bucket" "structhub_bucket" {
-#   name     = "structhub_terraform_state_bucket_${local.environment}"
-#   location = "us-central1" # Choose a location that suits your requirements
-
-#   # Optional: Add any additional configuration for the bucket if needed
-#   versioning {
-#     enabled = true
-#   }
-
-#   labels = {
-#     environment = local.environment
-#     project     = local.project_id
-#   }
-# }
-
 
 
 resource "google_project_service" "compute_api" {
   service                    = "compute.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+resource "google_project_service" "drive_api" {
+  service                    = "drive.googleapis.com"
   disable_dependent_services = false
   disable_on_destroy         = false
 }
@@ -265,6 +288,14 @@ resource "google_project_service" "storage_api" {
   disable_on_destroy         = false
 }
 
+resource "google_project_service" "firebase_api" {
+  project                    = local.project_id
+  service                    = "firebase.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+
 # resource "google_compute_address" "external_ip_fe" {
 #   name = local.external_ip_address_name_fe
 # }
@@ -272,6 +303,18 @@ resource "google_project_service" "storage_api" {
 # resource "google_compute_address" "external_ip_be" {
 #   name = local.external_ip_address_name_be
 # }
+
+resource "google_firestore_database" "firestore" {
+  name        = "structhub-${local.environment}"
+  location_id = "us-central1"
+  type        = "FIRESTORE_NATIVE"
+  project     = local.project_id
+  # Ensure the Firebase API is enabled before creating the Firebase project
+  depends_on = [
+    google_project_service.firebase_api
+  ]
+}
+
 
 resource "google_compute_global_address" "external_ip_fe" {
   name = "${local.external_ip_address_name_fe}${local.fe_domain_suffix}"
@@ -404,6 +447,16 @@ resource "google_compute_region_network_endpoint_group" "be_backend" {
     service = google_cloud_run_v2_service.be_cloud_run[local.regions[count.index]].name
   }
 }
+
+resource "google_compute_region_network_endpoint_group" "xlsx_backend" {
+  count                 = length(local.regions)
+  name                  = "${local.xlsx_service_name_prefix}${local.xlsx_domain_suffix}-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = local.regions[count.index]
+  cloud_run {
+    service = google_cloud_run_v2_service.xlsx_cloud_run[local.regions[count.index]].name
+  }
+}
 resource "google_cloud_run_v2_service" "fe_cloud_run" {
   for_each = toset(local.regions)
   name     = "${local.fe_service_name_prefix}${local.fe_domain_suffix}-${each.key}"
@@ -437,6 +490,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value = local.environment == "prod" ? "websearch.structhub.io" : "stage-websearch.structhub.io"
       }
       env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
       }
@@ -444,6 +501,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         name  = "GCP_CREDIT_USAGE_TOPIC"
         value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
       }
+      env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
       env {
         name  = "UPLOADS_FOLDER"
         value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
@@ -639,7 +700,7 @@ resource "google_cloudfunctions2_function" "credit_usage_function" {
 
   service_config {
     available_memory               = "256M"
-    max_instance_count             = 10
+    max_instance_count             = 10000
     timeout_seconds                = 60
     all_traffic_on_latest_revision = true
     environment_variables = {
@@ -714,18 +775,12 @@ resource "google_storage_bucket" "function_bucket" {
   location = "us-central1"
 }
 
+
 # Create a subscription so that we don't lose messages published to dead letter topic
 resource "google_pubsub_subscription" "credit_usage_dead_letter_subscription" {
   name  = "credit_usage_dead_letter_subscription${local.fe_domain_suffix}"
   topic = google_pubsub_topic.credit_usage_dead_letter_topic.name
 }
-
-# INDEXER CLOUD RUN 
-# # Create a dedicated service account
-# resource "google_service_account" "indexer_eventarc" {
-#   account_id   = "eventarc-trigger-sa-${local.environment}"
-#   display_name = "Eventarc Trigger Service Account"
-# }
 
 # Grant permission to receive Eventarc events
 resource "google_project_iam_member" "indexer_eventreceiver" {
@@ -783,6 +838,7 @@ resource "google_project_iam_member" "secretaccessor" {
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
 }
+
 resource "google_cloud_run_v2_service" "indexer_cloud_run" {
   for_each = toset(local.us_regions)
 
@@ -805,6 +861,10 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
         value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
       }
       env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
       }
@@ -812,6 +872,14 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
         name  = "GCP_CREDIT_USAGE_TOPIC"
         value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
       }
+      env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
       env {
         name  = "UPLOADS_FOLDER"
         value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
@@ -1046,6 +1114,10 @@ resource "google_compute_global_address" "websearch_external_ip" {
   name = "websearch${local.websearch_domain_suffix}-ip"
 }
 
+resource "google_compute_global_address" "xlsx_external_ip" {
+  name = "xlsx${local.xlsx_domain_suffix}-ip"
+}
+
 resource "google_compute_backend_service" "websearch_backend" {
   name                            = "websearch${local.websearch_domain_suffix}-backend"
   load_balancing_scheme           = "EXTERNAL_MANAGED"
@@ -1058,6 +1130,26 @@ resource "google_compute_backend_service" "websearch_backend" {
 
     content {
       group = google_compute_region_network_endpoint_group.websearch_backend[backend.key].id
+    }
+  }
+
+  depends_on = [
+    google_project_service.compute_api,
+  ]
+}
+
+resource "google_compute_backend_service" "xlsx_backend" {
+  name                            = "xlsx${local.xlsx_domain_suffix}-backend"
+  load_balancing_scheme           = "EXTERNAL_MANAGED"
+  connection_draining_timeout_sec = 3600
+  locality_lb_policy              = "RANDOM"
+  enable_cdn                      = false
+
+  dynamic "backend" {
+    for_each = local.regions
+
+    content {
+      group = google_compute_region_network_endpoint_group.xlsx_backend[backend.key].id
     }
   }
 
@@ -1089,6 +1181,38 @@ resource "google_compute_url_map" "websearch_url_map" {
   default_service = google_compute_backend_service.websearch_backend.id
 }
 
+resource "google_compute_managed_ssl_certificate" "xlsx_ssl_cert" {
+  name = "xlsx${local.xlsx_domain_suffix}-cert"
+  managed {
+    domains = [local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"]
+  }
+}
+
+resource "google_compute_target_https_proxy" "xlsx_https_proxy" {
+  name                        = "xlsx${local.xlsx_domain_suffix}-https"
+  ssl_certificates            = [google_compute_managed_ssl_certificate.xlsx_ssl_cert.id]
+  url_map                     = google_compute_url_map.xlsx_url_map.id
+  http_keep_alive_timeout_sec = 610
+
+  depends_on = [
+    google_compute_managed_ssl_certificate.xlsx_ssl_cert
+  ]
+}
+
+resource "google_compute_url_map" "xlsx_url_map" {
+  name            = "xlsx${local.xlsx_domain_suffix}"
+  default_service = google_compute_backend_service.xlsx_backend.id
+}
+
+resource "google_compute_global_forwarding_rule" "xlsx_forwarding_rule" {
+  name                  = "xlsx${local.xlsx_domain_suffix}-https"
+  target                = google_compute_target_https_proxy.xlsx_https_proxy.id
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  ip_address            = google_compute_global_address.xlsx_external_ip.id
+  port_range            = "443"
+  depends_on            = [google_compute_target_https_proxy.xlsx_https_proxy]
+}
+
 resource "google_compute_global_forwarding_rule" "websearch_forwarding_rule" {
   name                  = "websearch${local.websearch_domain_suffix}-https"
   target                = google_compute_target_https_proxy.websearch_https_proxy.id
@@ -1106,4 +1230,2330 @@ resource "google_compute_region_network_endpoint_group" "websearch_backend" {
   cloud_run {
     service = google_cloud_run_v2_service.websearch_cloud_run[local.regions[count.index]].name
   }
+}
+
+
+## Confluence
+
+# Create a Pub/Sub topic for Confluence
+resource "google_pubsub_topic" "confluence_topic" {
+  name = "confluence-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "confluence_topic_dead_letter_topic" {
+  name                       = "confluence-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+
+resource "google_cloud_run_v2_job" "confluence_cloud_run_job" {
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
+
+  # Name your job. You can tweak this however you like.
+  name                = "confluence-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        # Remove the "ports" block entirely for a Cloud Run Job
+        image = local.confluence_image
+
+        # Pass environment variables/secrets into your container:
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        # Set resource limits
+        resources {
+          limits = {
+            cpu    = local.confluence_cpu
+            memory = local.confluence_memory
+          }
+        }
+      }
+
+      # Increase the timeout if you expect the job to run a while
+      timeout = "10800s" # 3 hours
+    }
+
+    # For one-off ingestion, usually parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+# Generates an archive of the source code compressed as a .zip file.
+data "archive_file" "confluence_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../confluence-topic-function"
+  output_path = "${path.module}/confluence-topic-function.zip"
+}
+
+# Add source confluence topic function code zip to the Cloud Function's bucket (Cloud_function_bucket) 
+resource "google_storage_bucket_object" "confluence_zip" {
+  source       = "${path.module}/confluence-topic-function.zip"
+  content_type = "application/zip"
+  name         = "confluence-topic-function${local.fe_domain_suffix}-${data.archive_file.confluence_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.confluence_topic_function_bucket.name
+  depends_on = [
+    google_storage_bucket.confluence_topic_function_bucket,
+    data.archive_file.confluence_topic_function_source
+  ]
+}
+
+resource "google_storage_bucket" "confluence_topic_function_bucket" {
+  name     = "confluence-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+resource "google_cloud_run_service_iam_binding" "confluence_function_cloud_run_iam_binding" {
+  project  = google_cloudfunctions2_function.confluence_trigger_function.project
+  location = google_cloudfunctions2_function.confluence_trigger_function.location
+  service  = google_cloudfunctions2_function.confluence_trigger_function.name
+  role     = "roles/run.invoker"
+  members = [
+    "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
+  ]
+  depends_on = [google_cloudfunctions2_function.confluence_trigger_function]
+
+  lifecycle {
+    replace_triggered_by = [google_cloudfunctions2_function.confluence_trigger_function]
+  }
+}
+resource "google_cloudfunctions2_function" "confluence_trigger_function" {
+  name     = "confluence-topic-function-${local.environment}"
+  location = "us-central1"
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.confluence_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_confluence_job"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.confluence_topic_function_bucket.name
+        object = "confluence-topic-function${local.fe_domain_suffix}-${data.archive_file.confluence_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.confluence_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+  depends_on = [
+    google_pubsub_topic.confluence_topic,
+    google_pubsub_topic.confluence_topic_dead_letter_topic,
+    google_cloud_run_v2_job.confluence_cloud_run_job
+  ]
+}
+
+
+# Google Drive
+# Create a Pub/Sub topic for Google drive Source
+resource "google_pubsub_topic" "gdrive_topic" {
+  name = "gdrive-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "gdrive_topic_dead_letter_topic" {
+  name                       = "gdrive-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+
+resource "google_cloud_run_v2_job" "gdrive_cloud_run_job" {
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
+
+  # Name your job. You can tweak this however you like.
+  name                = "gdrive-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        # Remove the "ports" block entirely for a Cloud Run Job
+        image = local.gdrive_image
+
+        # Pass environment variables/secrets into your container:
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+        env {
+          name = "GOOGLE_CLIENT_ID"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "GOOGLE_CLIENT_ID" : "GOOGLE_CLIENT_ID_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "GOOGLE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "GOOGLE_CLIENT_SECRET" : "GOOGLE_CLIENT_SECRET_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        # Set resource limits
+        resources {
+          limits = {
+            cpu    = local.gdrive_cpu
+            memory = local.gdrive_memory
+          }
+        }
+      }
+
+      # Increase the timeout if you expect the job to run a while
+      timeout = "10800s" # 3 hours
+    }
+
+    # For one-off ingestion, usually parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+# Generates an archive of the source code compressed as a .zip file.
+data "archive_file" "gdrive_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../gdrive-topic-function"
+  output_path = "${path.module}/gdrive-topic-function.zip"
+}
+
+# Add source gdrive topic function code zip to the Cloud Function's bucket (Cloud_function_bucket) 
+resource "google_storage_bucket_object" "gdrive_zip" {
+  source       = "${path.module}/gdrive-topic-function.zip"
+  content_type = "application/zip"
+  name         = "gdrive-topic-function${local.fe_domain_suffix}-${data.archive_file.gdrive_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.gdrive_topic_function_bucket.name
+  depends_on = [
+    google_storage_bucket.gdrive_topic_function_bucket,
+    data.archive_file.gdrive_topic_function_source
+  ]
+}
+
+resource "google_storage_bucket" "gdrive_topic_function_bucket" {
+  name     = "gdrive-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+resource "google_cloud_run_service_iam_binding" "gdrive_function_cloud_run_iam_binding" {
+  project  = google_cloudfunctions2_function.gdrive_trigger_function.project
+  location = google_cloudfunctions2_function.gdrive_trigger_function.location
+  service  = google_cloudfunctions2_function.gdrive_trigger_function.name
+  role     = "roles/run.invoker"
+  members = [
+    "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
+  ]
+  depends_on = [google_cloudfunctions2_function.gdrive_trigger_function]
+
+  lifecycle {
+    replace_triggered_by = [google_cloudfunctions2_function.gdrive_trigger_function]
+  }
+}
+resource "google_cloudfunctions2_function" "gdrive_trigger_function" {
+  name     = "gdrive-topic-function-${local.environment}"
+  location = "us-central1"
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.gdrive_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_gdrive_job"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.gdrive_topic_function_bucket.name
+        object = "gdrive-topic-function${local.fe_domain_suffix}-${data.archive_file.gdrive_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.gdrive_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+  depends_on = [
+    google_pubsub_topic.gdrive_topic,
+    google_pubsub_topic.gdrive_topic_dead_letter_topic,
+    google_cloud_run_v2_job.gdrive_cloud_run_job
+  ]
+}
+
+
+
+#### ONE DRIVE
+
+resource "google_pubsub_topic" "onedrive_topic" {
+  name = "onedrive-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "onedrive_topic_dead_letter_topic" {
+  name                       = "onedrive-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s" # ~31 days, adjust as needed
+}
+
+resource "google_cloud_run_v2_job" "onedrive_cloud_run_job" {
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
+
+  name                = "onedrive-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        # NOTE: No ports for a Cloud Run Job container
+        image = local.onedrive_image
+
+        # Environment variables / secrets
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        # Insert your OneDrive-specific secrets or config here:
+        env {
+          name = "ONEDRIVE_CLIENT_ID"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "ONEDRIVE_CLIENT_ID" : "ONEDRIVE_CLIENT_ID_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "ONEDRIVE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "ONEDRIVE_CLIENT_SECRET" : "ONEDRIVE_CLIENT_SECRET_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = local.gdrive_cpu    # or local.onedrive_cpu if you have a separate variable
+            memory = local.gdrive_memory # or local.onedrive_memory
+          }
+        }
+      }
+
+      # Adjust the Job timeout as needed for your OneDrive ingestion tasks
+      timeout = "10800s" # 3 hours
+    }
+
+    # For a one-off ingestion, typically parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+data "archive_file" "onedrive_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../onedrive-topic-function"
+  output_path = "${path.module}/onedrive-topic-function.zip"
+}
+
+resource "google_storage_bucket" "onedrive_topic_function_bucket" {
+  name     = "onedrive-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "onedrive_zip" {
+  source       = "${path.module}/onedrive-topic-function.zip"
+  content_type = "application/zip"
+  name         = "onedrive-topic-function${local.fe_domain_suffix}-${data.archive_file.onedrive_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.onedrive_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.onedrive_topic_function_bucket,
+    data.archive_file.onedrive_topic_function_source
+  ]
+}
+
+resource "google_cloudfunctions2_function" "onedrive_trigger_function" {
+  name     = "onedrive-topic-function-${local.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.onedrive_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_onedrive_job" # Adjust to match your Python function name
+    source {
+      storage_source {
+        bucket = google_storage_bucket.onedrive_topic_function_bucket.name
+        object = "onedrive-topic-function${local.fe_domain_suffix}-${data.archive_file.onedrive_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      # The function typically needs to know the Cloud Run Job name/region it must invoke
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.onedrive_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+
+    # If your function needs DB credentials or other secrets
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.onedrive_topic,
+    google_pubsub_topic.onedrive_topic_dead_letter_topic,
+    google_cloud_run_v2_job.onedrive_cloud_run_job
+  ]
+}
+
+# create a subscription to the dead-letter topic
+resource "google_pubsub_subscription" "onedrive_dead_letter_subscription" {
+  name  = "onedrive_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.onedrive_topic_dead_letter_topic.name
+}
+
+#### SHAREPOINT
+
+resource "google_pubsub_topic" "sharepoint_topic" {
+  name = "sharepoint-topic-${local.environment}"
+}
+
+
+resource "google_pubsub_topic" "sharepoint_topic_dead_letter_topic" {
+  name                       = "sharepoint-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s" # ~31 days, adjust as needed
+}
+
+
+resource "google_cloud_run_v2_job" "sharepoint_cloud_run_job" {
+  # Deploy this job to multiple regions if desired
+  for_each = toset(local.us_regions)
+
+  name                = "sharepoint-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        # NOTE: No ports for a Cloud Run Job container
+        image = local.sharepoint_image
+
+        # Environment variables / secrets
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        # Insert your SharePoint-specific secrets or config here:
+        env {
+          name = "SHAREPOINT_CLIENT_ID"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SHAREPOINT_CLIENT_ID" : "SHAREPOINT_CLIENT_ID_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SHAREPOINT_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SHAREPOINT_CLIENT_SECRET" : "SHAREPOINT_CLIENT_SECRET_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = local.sharepoint_cpu    # Define local.sharepoint_cpu accordingly
+            memory = local.sharepoint_memory # Define local.sharepoint_memory accordingly
+          }
+        }
+      }
+
+      # Adjust the Job timeout as needed for your SharePoint ingestion tasks
+      timeout = "10800s" # 3 hours
+    }
+
+    # For a one-off ingestion, typically parallelism=1, task_count=1
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+
+data "archive_file" "sharepoint_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../sharepoint-topic-function" # Adjust the path as necessary
+  output_path = "${path.module}/sharepoint-topic-function.zip"
+}
+
+resource "google_storage_bucket" "sharepoint_topic_function_bucket" {
+  name     = "sharepoint-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "sharepoint_zip" {
+  source       = "${path.module}/sharepoint-topic-function.zip"
+  content_type = "application/zip"
+  name         = "sharepoint-topic-function${local.fe_domain_suffix}-${data.archive_file.sharepoint_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.sharepoint_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.sharepoint_topic_function_bucket,
+    data.archive_file.sharepoint_topic_function_source
+  ]
+}
+
+
+resource "google_cloudfunctions2_function" "sharepoint_trigger_function" {
+  name     = "sharepoint-topic-function-${local.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.sharepoint_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_sharepoint_job" # Adjust to match your Python function name
+    source {
+      storage_source {
+        bucket = google_storage_bucket.sharepoint_topic_function_bucket.name
+        object = "sharepoint-topic-function${local.fe_domain_suffix}-${data.archive_file.sharepoint_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      # The function typically needs to know the Cloud Run Job name/region it must invoke
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.sharepoint_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+
+    # If your function needs DB credentials or other secrets
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.sharepoint_topic,
+    google_pubsub_topic.sharepoint_topic_dead_letter_topic,
+    google_cloud_run_v2_job.sharepoint_cloud_run_job
+  ]
+}
+
+# Create a subscription to the dead-letter topic
+resource "google_pubsub_subscription" "sharepoint_dead_letter_subscription" {
+  name  = "sharepoint_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.sharepoint_topic_dead_letter_topic.name
+}
+
+############################
+# S3 Pub/Sub Topics
+############################
+resource "google_pubsub_topic" "s3_topic" {
+  name = "s3-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "s3_topic_dead_letter_topic" {
+  name                       = "s3-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s" # ~31 days
+}
+
+resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
+  # Deploy to multiple regions if you want
+  for_each = toset(local.us_regions)
+
+  name                = "s3-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        image = local.s3_image # Docker image for your s3_ingest.py job
+
+        # Example env vars
+
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        # Example secrets
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = local.s3_cpu    # define local.s3_cpu
+            memory = local.s3_memory # define local.s3_memory
+          }
+        }
+      }
+
+      timeout = "10800s" # 3 hours, for example
+    }
+
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+data "archive_file" "s3_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../s3-topic-function" # path to your CF code
+  output_path = "${path.module}/s3-topic-function.zip"
+}
+
+resource "google_storage_bucket" "s3_topic_function_bucket" {
+  name     = "s3-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "s3_zip" {
+  source       = "${path.module}/s3-topic-function.zip"
+  content_type = "application/zip"
+  name         = "s3-topic-function${local.fe_domain_suffix}-${data.archive_file.s3_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.s3_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.s3_topic_function_bucket,
+    data.archive_file.s3_topic_function_source
+  ]
+}
+
+resource "google_cloudfunctions2_function" "s3_trigger_function" {
+  name     = "s3-topic-function-${local.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.s3_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_s3_job" # your CF python function
+    source {
+      storage_source {
+        bucket = google_storage_bucket.s3_topic_function_bucket.name
+        object = "s3-topic-function${local.fe_domain_suffix}-${data.archive_file.s3_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.s3_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.s3_topic,
+    google_pubsub_topic.s3_topic_dead_letter_topic,
+    google_cloud_run_v2_job.s3_cloud_run_job
+  ]
+}
+
+resource "google_pubsub_subscription" "s3_dead_letter_subscription" {
+  name  = "s3_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.s3_topic_dead_letter_topic.name
+}
+
+
+# GCP 
+resource "google_pubsub_topic" "gcpbucket_topic" {
+  name = "gcpbucket-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "gcpbucket_topic_dead_letter_topic" {
+  name                       = "gcpbucket-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+resource "google_cloud_run_v2_job" "gcpbucket_cloud_run_job" {
+  for_each = toset(local.us_regions)
+
+  name                = "gcpbucket-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        image = local.gcpbucket_image
+
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = local.gcpbucket_cpu
+            memory = local.gcpbucket_memory
+          }
+        }
+      }
+
+      timeout = "10800s"
+    }
+
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+data "archive_file" "gcpbucket_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../gcpBucket-topic-function"
+  output_path = "${path.module}/gcpbucket-topic-function.zip"
+}
+
+resource "google_storage_bucket" "gcpbucket_topic_function_bucket" {
+  name     = "gcpbucket-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "gcpbucket_zip" {
+  source       = "${path.module}/gcpbucket-topic-function.zip"
+  content_type = "application/zip"
+  name         = "gcpbucket-topic-function${local.fe_domain_suffix}-${data.archive_file.gcpbucket_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.gcpbucket_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.gcpbucket_topic_function_bucket,
+    data.archive_file.gcpbucket_topic_function_source
+  ]
+}
+
+resource "google_cloudfunctions2_function" "gcpbucket_trigger_function" {
+  name     = "gcpbucket-topic-function-${local.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.gcpbucket_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_gcpBucket_job"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.gcpbucket_topic_function_bucket.name
+        object = "gcpbucket-topic-function${local.fe_domain_suffix}-${data.archive_file.gcpbucket_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.gcpbucket_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.gcpbucket_topic,
+    google_pubsub_topic.gcpbucket_topic_dead_letter_topic,
+    google_cloud_run_v2_job.gcpbucket_cloud_run_job
+  ]
+}
+
+resource "google_pubsub_subscription" "gcpbucket_dead_letter_subscription" {
+  name  = "gcpbucket_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.gcpbucket_topic_dead_letter_topic.name
+}
+
+# BM25 vocab updater function:
+resource "google_pubsub_topic" "bm25_vocab_updater_topic" {
+  name = "bm25-vocab-updater-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "bm25_vocab_updater_topic_dead_letter_topic" {
+  name                       = "bm25-vocab-updater-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+data "archive_file" "bm25_vocab_updater_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../bm25-vocab-updater-function"
+  output_path = "${path.module}/bm25-vocab-updater-topic-function.zip"
+}
+
+resource "google_storage_bucket" "bm25_vocab_updater_topic_function_bucket" {
+  name     = "bm25-vocab-updater-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "bm25_vocab_updater_zip" {
+  source       = "${path.module}/bm25-vocab-updater-topic-function.zip"
+  content_type = "application/zip"
+  name         = "bm25-vocab-updater-topic-function${local.fe_domain_suffix}-${data.archive_file.bm25_vocab_updater_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.bm25_vocab_updater_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.bm25_vocab_updater_topic_function_bucket,
+    data.archive_file.bm25_vocab_updater_topic_function_source
+  ]
+}
+
+
+resource "google_cloudfunctions2_function" "bm25_vocab_updater" {
+  name     = "bm25-vocab-updater-${var.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.bm25_vocab_updater_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_bm25_vocab_updater"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.bm25_vocab_updater_topic_function_bucket.name
+        object = google_storage_bucket_object.bm25_vocab_updater_zip.name
+      }
+    }
+  }
+
+  service_config {
+    max_instance_count  = 10000
+    min_instance_count = 1
+    available_memory               = "256M"
+    timeout_seconds                = 300
+    all_traffic_on_latest_revision = true
+    environment_variables = {
+      GCP_PROJECT_ID = local.project_id,
+      BM25_VOCAB_UPDATES_TOPIC = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+      FIRESTORE_DB = google_firestore_database.firestore.name
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.bm25_vocab_updater_topic,
+    google_storage_bucket_object.bm25_vocab_updater_zip,
+    google_firestore_database.firestore
+  ]
+}
+
+resource "google_pubsub_subscription" "bm25_vocab_updater_dead_letter_subscription" {
+  name  = "bm25_vocab_updater_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.bm25_vocab_updater_topic_dead_letter_topic.name
+}
+
+############################
+# Azure Blob Pub/Sub Topics
+############################
+resource "google_pubsub_topic" "azureblob_topic" {
+  name = "azureblob-topic-${local.environment}"
+}
+
+resource "google_pubsub_topic" "azureblob_topic_dead_letter_topic" {
+  name                       = "azureblob-topic-dead-letter-topic${local.fe_domain_suffix}"
+  message_retention_duration = "2678400s"
+}
+
+resource "google_cloud_run_v2_job" "azureblob_cloud_run_job" {
+  for_each = toset(local.us_regions)
+
+  name                = "azureblob-job${local.indexer_domain_suffix}-${each.key}"
+  location            = each.key
+
+  template {
+    template {
+      service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+      containers {
+        image = local.azureblob_image
+
+        env {
+          name  = "SERVER_URL"
+          value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
+        }
+        env {
+        name  = "XLSX_SERVER_URL"
+        value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+          name  = "UPLOADS_FOLDER"
+          value = "/app/uploads"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        resources {
+          limits = {
+            cpu    = local.azureblob_cpu
+            memory = local.azureblob_memory
+          }
+        }
+      }
+
+      timeout = "10800s"
+    }
+
+    parallelism = 1
+    task_count  = 1
+  }
+
+  depends_on = [
+    google_project_service.run_api,
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_iam_member.secretaccessor
+  ]
+}
+
+data "archive_file" "azureblob_topic_function_source" {
+  type        = "zip"
+  source_dir  = "../../azureBlob-topic-function"
+  output_path = "${path.module}/azureblob-topic-function.zip"
+}
+
+resource "google_storage_bucket" "azureblob_topic_function_bucket" {
+  name     = "azureblob-function-bucket${local.fe_domain_suffix}"
+  location = "us-central1"
+}
+
+resource "google_storage_bucket_object" "azureblob_zip" {
+  source       = "${path.module}/azureblob-topic-function.zip"
+  content_type = "application/zip"
+  name         = "azureblob-topic-function${local.fe_domain_suffix}-${data.archive_file.azureblob_topic_function_source.output_md5}.zip"
+  bucket       = google_storage_bucket.azureblob_topic_function_bucket.name
+
+  depends_on = [
+    google_storage_bucket.azureblob_topic_function_bucket,
+    data.archive_file.azureblob_topic_function_source
+  ]
+}
+
+resource "google_cloudfunctions2_function" "azureblob_trigger_function" {
+  name     = "azureblob-topic-function-${local.environment}"
+  location = "us-central1"
+
+  event_trigger {
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.azureblob_topic.id
+    trigger_region = "us-central1"
+    retry_policy   = "RETRY_POLICY_RETRY"
+  }
+
+  build_config {
+    runtime     = "python310"
+    entry_point = "pubsub_to_cloud_run_azureBlob_job"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.azureblob_topic_function_bucket.name
+        object = "azureblob-topic-function${local.fe_domain_suffix}-${data.archive_file.azureblob_topic_function_source.output_md5}.zip"
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    max_instance_count             = 10000
+    timeout_seconds                = 60
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      CLOUD_RUN_JOB_NAME = google_cloud_run_v2_job.azureblob_cloud_run_job["us-central1"].name
+      CLOUD_RUN_REGION   = "us-central1"
+      GCP_PROJECT_ID     = local.project_id
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      secret     = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+      key        = "PSQL_HOST"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PASSWORD"
+      secret     = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_USERNAME"
+      secret     = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_DATABASE"
+      secret     = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+      version    = "latest"
+    }
+    secret_environment_variables {
+      project_id = local.project_id
+      key        = "PSQL_PORT"
+      secret     = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+      version    = "latest"
+    }
+  }
+
+  depends_on = [
+    google_pubsub_topic.azureblob_topic,
+    google_pubsub_topic.azureblob_topic_dead_letter_topic,
+    google_cloud_run_v2_job.azureblob_cloud_run_job
+  ]
+}
+
+resource "google_pubsub_subscription" "azure_dead_letter_subscription" {
+  name  = "azureblob_dead_letter_subscription${local.fe_domain_suffix}"
+  topic = google_pubsub_topic.azureblob_topic_dead_letter_topic.name
+}
+
+# New xlsx-indexer service
+resource "google_cloud_run_v2_service" "xlsx_cloud_run" {
+  for_each = toset(local.regions)
+
+  name     = "${local.xlsx_service_name_prefix}${local.xlsx_domain_suffix}-${each.key}"
+  
+  location = each.key
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  template {
+    scaling {
+      max_instance_count = local.region_instance_counts[each.key].be_max_inst
+      min_instance_count = local.region_instance_counts[each.key].be_min_inst
+    }
+    containers {
+      env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+      ports {
+        container_port = local.xlsx_port
+      }
+      image = local.xlsx_image
+      resources {
+        limits = {
+          cpu    = local.xlsx_cpu
+          memory = local.xlsx_memory
+        }
+      }
+    }
+    timeout                          = "3600s"  # 1 hour for xlsx-indexer
+    max_instance_request_concurrency = 1  # Recommended for long-running tasks
+  }
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+  custom_audiences = [local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"]
+  depends_on = [
+    google_project_service.run_api
+  ]
 }

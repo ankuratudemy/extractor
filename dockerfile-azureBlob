@@ -1,0 +1,68 @@
+# Use the official Python image as the base image
+FROM python:3.10-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install Java, wget, and SSL dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends default-jre libreoffice-java-common wget ca-certificates openssl apt-transport-https  unoconv fontconfig software-properties-common libxinerama1 ibus 
+COPY LibreOffice_7.6.4_Linux_x86-64_deb.tar.gz .
+# COPY libssl3_3.0.2-0ubuntu1.12_amd64.deb .
+RUN tar -xvzf LibreOffice_7.6.4_Linux_x86-64_deb.tar.gz
+#RUN dpkg -i /app/libssl3_3.0.2-0ubuntu1.12_amd64.deb
+RUN dpkg -i /app/LibreOffice_*/DEBS/*.deb
+RUN apt-get update
+RUN ls /opt/
+# #Configuring SOFFICE client for terminal operations
+RUN ln -s /opt/libreoffice7.6/program/soffice /usr/local/bin/soffice
+RUN ln -s /opt/libreoffice7.6/program/soffice /usr/local/bin/lowriter
+
+RUN /opt/libreoffice7.6/program/soffice --version
+# Create a new directory called "uploads"
+RUN mkdir /app/uploads
+
+RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+RUN echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+
+RUN apt-get update && apt-get install -y --no-install-recommends -t bookworm ttf-mscorefonts-installer 
+
+#RUN rm -Rf /usr/share/fonts/*
+#RUN ls -ltr /usr/share/fonts
+COPY /fonts/* /usr/share/fonts
+
+RUN ls -ltr /usr/share/fonts
+RUN fc-cache -f -v
+RUN fc-list
+RUN  apt-get install --yes --no-install-recommends tesseract-ocr-all \
+    && echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        xfonts-utils \
+        fonts-freefont-ttf \
+        fonts-liberation \
+        fonts-indic \
+        fonts-beng \
+        ttf-mscorefonts-installer \
+        wget \
+        cabextract \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# RUN wget -O find_uno.py --no-check-certificate https://gist.githubusercontent.com/regebro/036da022dc7d5241a0ee97efdf1458eb/raw/find_uno.py
+# RUN python3 find_uno.py
+COPY ./SAKeys/fe-key.json key.json
+# Copy the application code to the container
+# (Optional) Add Debian Bookworm repository only if needed
+# If not required, it's better to remove these lines to keep the image slim
+# RUN echo "deb http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list && \
+#     echo "deb-src http://deb.debian.org/debian/ bookworm contrib" >> /etc/apt/sources.list
+
+# Rebuild font cache (just in case)
+RUN fc-cache -f -v
+COPY requirements-azureBlob.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+# Tell Python where to find your service account credentials
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/key.json
+COPY ./shared /app/shared
+# For Cloud Run JOB, we typically do NOT EXPOSE a port
+COPY app-azureBlob.py app.py
+# In a Cloud Run Job, you typically just run your script once:
+CMD ["python", "app.py"]
