@@ -6,7 +6,11 @@ import psycopg2
 import redis
 import time
 import uuid
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 # Retrieve PostgreSQL connection parameters from environment variables
 db_params = {
@@ -29,29 +33,42 @@ def update_remaining_credits(key_name, value):
 
     while retries < MAX_RETRIES:
         try:
-            redis_conn = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
+            redis_conn = redis.StrictRedis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                password=REDIS_PASSWORD,
+                decode_responses=True
+            )
             res = redis_conn.set(name=key_name, value=value)
-            print(f"Redis db response: {res}")
+            log.info(f"Redis db response for {key_name}: {res}")
             return True
         except redis.RedisError as e:
-            print(f"Error connecting to Redis: {str(e)}")
+            log.error(f"Error connecting to Redis: {str(e)}")
             retries += 1
             time.sleep(1)  # You may adjust the sleep duration between retries
-    print(f"Failed after {MAX_RETRIES} retries to update Redis key")
+    log.error(f"Failed after {MAX_RETRIES} retries to update Redis key {key_name}")
     return False
 
 # Google Cloud Function entry point
 def pubsub_to_postgresql(event, context):
     # Decode the base64-encoded Pub/Sub message
-    pubsub_message = event["data"]
-    message_data = base64.b64decode(pubsub_message).decode("utf-8")
+    pubsub_message = event.get("data", "")
+    if not pubsub_message:
+        log.error("No data found in the Pub/Sub message.")
+        return
+
+    try:
+        message_data = base64.b64decode(pubsub_message).decode("utf-8")
+    except Exception as e:
+        log.error(f"Error decoding Pub/Sub message: {str(e)}")
+        return
 
     # Parse the message data as JSON
     try:
         data = json.loads(message_data)
-        print(f"Data Received from topic: {data}")
+        log.info(f"Data Received from topic: {data}")
     except json.JSONDecodeError:
-        print("Error decoding Pub/Sub message.")
+        log.error("Error decoding Pub/Sub message as JSON.")
         return
 
     # Extract data from the event
@@ -61,75 +78,112 @@ def pubsub_to_postgresql(event, context):
     project_id = data.get('project_id')
     credits_used = data.get('creditsUsed')
 
-    # Check if subscription_id, project_id, or credits_used are missing,
-    # or if both data_source_id and user_id are missing
+    # Validate required fields
     if not subscription_id or not project_id or not credits_used or (not data_source_id and not user_id):
-        print("Missing required data in the event.")
+        log.error("Missing required data in the event.")
         return
 
-    # Perform the PostgreSQL transaction
     try:
         with psycopg2.connect(**db_params) as connection:
+            connection.autocommit = False  # Start a transaction
             with connection.cursor() as cursor:
-                # Start the transaction
-                connection.autocommit = False
+                # Use a consistent lock based on subscription_id to prevent race conditions
+                lock_id = hash(subscription_id)  # Consistent lock ID
                 try:
-                    # Acquire an advisory lock to serialize access to the credit update
-                    lock_id = int(time.time() * 1000)  # milliseconds since the epoch
                     cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
+                    log.info(f"Acquired advisory lock for subscription_id {subscription_id}.")
+                except Exception as e:
+                    log.error(f"Error acquiring advisory lock: {str(e)}")
+                    return
 
-                    # Insert into CreditUsage table
+                # Initialize variables to capture remaining credits
+                subscription_remaining_credits = None
+
+                # 1. Insert into CreditUsage table
+                try:
                     cursor.execute(
                         'INSERT INTO "CreditUsage" ("id","creditsUsed", "timestamp", "subscriptionId", "projectId", "userId", "dataSourceId") VALUES (%s, %s, NOW(), %s, %s, %s, %s)',
-                        (str(uuid.uuid4()),credits_used, subscription_id, project_id, user_id, data_source_id)
+                        (str(uuid.uuid4()), credits_used, subscription_id, project_id, user_id, data_source_id)
                     )
+                    log.info("Inserted into CreditUsage table.")
+                except psycopg2.errors.ForeignKeyViolation as e:
+                    # Rollback to the start of the transaction to avoid affecting other operations
+                    connection.rollback()
+                    log.warning(f"ForeignKeyViolation while inserting CreditUsage: {str(e)}. Continuing without inserting CreditUsage.")
+                    # Re-establish the transaction for further operations
+                    connection.autocommit = False
+                    cursor = connection.cursor()
+                except Exception as e:
+                    connection.rollback()
+                    log.error(f"Error inserting into CreditUsage: {str(e)}. Continuing without inserting CreditUsage.")
+                    # Re-establish the transaction for further operations
+                    connection.autocommit = False
+                    cursor = connection.cursor()
 
-                    # Update Subscription table (subtract creditsUsed from remainingCredits)
+                # 2. Update Subscription table (subtract creditsUsed)
+                try:
                     cursor.execute(
                         'UPDATE "Subscription" SET "remainingCredits" = "remainingCredits" - %s WHERE "id" = %s RETURNING "remainingCredits"',
                         (credits_used, subscription_id)
                     )
-                    subscription_remaining_credits = cursor.fetchone()
-                    if subscription_remaining_credits:
-                        subscription_remaining_credits = subscription_remaining_credits[0]
-                        print(f"Subscription remaining credits: {subscription_remaining_credits}")
+                    result = cursor.fetchone()
+                    if result:
+                        subscription_remaining_credits = result[0]
+                        log.info(f"Subscription {subscription_id} remaining credits: {subscription_remaining_credits}")
                     else:
                         raise Exception(f"Subscription ID {subscription_id} not found.")
+                except Exception as e:
+                    log.error(f"Error updating Subscription table: {str(e)}. Continuing with other updates.")
+                    # Continue without raising the exception
 
-                    # Update Project table (add creditsUsed to creditsUsed)
+                # 3. Update Project table (add creditsUsed)
+                try:
                     cursor.execute(
                         'UPDATE "Project" SET "creditsUsed" = "creditsUsed" + %s WHERE "id" = %s RETURNING "creditsUsed"',
                         (credits_used, project_id)
                     )
-                    project_credits_used = cursor.fetchone()
-                    if project_credits_used:
-                        project_credits_used = project_credits_used[0]
-                        print(f"Project credits used: {project_credits_used}")
+                    result = cursor.fetchone()
+                    if result:
+                        project_credits_used = result[0]
+                        log.info(f"Project {project_id} credits used: {project_credits_used}")
                     else:
                         raise Exception(f"Project ID {project_id} not found.")
+                except Exception as e:
+                    log.error(f"Error updating Project table: {str(e)}. Continuing with other updates.")
+                    # Continue without raising the exception
 
-                    # Optional: Update User table (e.g., update lastActiveTimestamp)
-                    if user_id:
+                # 4. Optionally update User table (e.g., update lastActiveTimestamp)
+                if user_id:
+                    try:
                         cursor.execute(
                             'UPDATE "User" SET "lastActiveTimestamp" = NOW() WHERE "id" = %s',
                             (user_id,)
                         )
+                        log.info(f"Updated User {user_id} lastActiveTimestamp.")
+                    except Exception as e:
+                        log.error(f"Error updating User table: {str(e)}. Continuing with other updates.")
+                        # Continue without raising the exception
 
-                    # Commit the transaction if all queries succeed
+                # Commit the transaction
+                try:
                     connection.commit()
-                    print("Transaction completed successfully.")
-
-                    # Update Redis keys with the remaining credits values
-                    subscription_credits_key = f"subscription_{subscription_id}_remaining_credits"
-                    update_remaining_credits(subscription_credits_key, subscription_remaining_credits)
-                    print(f"Updated Redis key {subscription_credits_key} with new value: {subscription_remaining_credits}")
-
+                    log.info("Transaction committed successfully.")
                 except Exception as e:
-                    # Rollback the transaction if any part fails
                     connection.rollback()
-                    print(f"Error during transaction: {str(e)}")
-                    sys.exit("Function execution failed.")
+                    log.error(f"Error committing transaction: {str(e)}")
+                    return
 
+                # 5. Update Redis with the remaining credits
+                if subscription_remaining_credits is not None:
+                    subscription_credits_key = f"subscription_{subscription_id}_remaining_credits"
+                    if update_remaining_credits(subscription_credits_key, subscription_remaining_credits):
+                        log.info(f"Updated Redis key {subscription_credits_key} with new value: {subscription_remaining_credits}")
+                    else:
+                        log.error(f"Failed to update Redis key {subscription_credits_key}")
+                else:
+                    log.warning(f"Subscription remaining credits not available. Redis update skipped.")
+
+    except psycopg2.OperationalError as e:
+        log.error(f"Error connecting to PostgreSQL: {str(e)}")
     except Exception as e:
-        print(f"Error connecting to PostgreSQL: {str(e)}")
-        sys.exit("Function execution failed.")
+        log.error(f"Unexpected error: {str(e)}")

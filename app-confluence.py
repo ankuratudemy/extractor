@@ -32,8 +32,21 @@ from shared.logging_config import log
 from shared import psql, google_pub_sub
 from pinecone import Pinecone
 
+# BM25 + sparse vector utilities (with no spaCy usage)
+from shared.bm25 import (
+    tokenize_document,
+    publish_partial_bm25_update,
+    compute_bm25_sparse_vector,
+    get_project_vocab_stats
+)
+
+# ----------------------------------------------------------------------------
+# ENV VARIABLES
+# ----------------------------------------------------------------------------
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+FIRESTORE_DB = os.environ.get("FIRESTORE_DB")
 GCP_CREDIT_USAGE_TOPIC = os.environ.get("GCP_CREDIT_USAGE_TOPIC")
+UPLOADS_FOLDER = os.environ.get("UPLOADS_FOLDER", "/tmp/uploads")  # default
 
 ######################################################################
 # MONKEY PATCHING
@@ -77,6 +90,29 @@ setattr(Image, "_decompression_bomb_check", custom_decompression_bomb_check)
 ######################################################################
 # HELPER FUNCTIONS
 ######################################################################
+
+def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
+    """
+    - Combine all file text into one big string.
+    - Publish partial update once so aggregator merges the entire file's token freq.
+    - Fetch and return the updated vocab stats from Firestore.
+    """
+    # 1) Combine
+    combined_text = " ".join(file_texts)
+
+    # 2) Tokenize
+    tokens = tokenize_document(combined_text)
+
+    # 3) Publish partial update => aggregator merges term freq
+    publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
+
+    # 4) Get BM25 stats from Firestore => { "N":..., "avgdl":..., "vocab": { term-> {df, tf} } }
+    vocab_stats = get_project_vocab_stats(project_id)
+
+    return compute_bm25_sparse_vector(tokens, project_id, vocab_stats, max_terms=max_terms)
+
+
+
 
 def get_event_loop():
     """
@@ -261,7 +297,7 @@ def process_confluence_requests(
     page_id_to_file_key = {}  # Map page_id to file_key for easy lookup
     for c_page_id in child_ids:
         log.info(f"c_page_id: {c_page_id}")
-        c_file_key = generate_md5_hash(sub_for_hash, project_id, c_page_id)
+        c_file_key = generate_md5_hash(sub_for_hash, project_id, data_source_id, c_page_id)
         confluence_file_keys.add(c_file_key)
         page_id_to_file_key[c_page_id] = c_file_key
 
@@ -379,7 +415,7 @@ def process_confluence_requests(
             page_content = doc.page_content or ""
 
             sub_for_hash = subscription_id if subscription_id else "no_subscription"
-            file_id = generate_md5_hash(sub_for_hash, project_id, page_id)
+            file_id = generate_md5_hash(sub_for_hash, project_id, data_source_id, page_id)
 
             now_dt = datetime.now(timezone.utc)
 
@@ -415,6 +451,7 @@ def process_confluence_requests(
                 continue
 
             # Prepare vector
+            sparse_values = get_sparse_values(page_content, namespace)
             vector_id = f"{data_source_id}#{file_id}#{project_id}"
             vector_metadata = {
                 "text": page_content,
@@ -426,7 +463,7 @@ def process_confluence_requests(
                 "source": doc.metadata.get("source", "ConfluencePage"),
                 "page": 1
             }
-            pinecone_vectors.append((vector_id, embedding, vector_metadata))
+            pinecone_vectors.append((vector_id, embedding,sparse_values, vector_metadata))
             local_counter += 1
 
             if (local_counter % batch_size == 0) or (idx == len(docs)):
@@ -442,7 +479,7 @@ def process_confluence_requests(
                         _, _, metadata = vector
                         page_id = metadata.get("pageId", "unknown_id")
                         file_id_to_update = generate_md5_hash(
-                            sub_for_hash, project_id, page_id
+                            sub_for_hash, project_id, data_source_id, page_id
                         )
                         try:
                             psql.update_file_status(

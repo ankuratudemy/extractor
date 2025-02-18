@@ -1,0 +1,7 @@
+psycopg2-binary
+google-cloud-pubsub
+google-cloud-storage
+google-cloud-firestore==2.19.0
+google-api-core
+redis
+
