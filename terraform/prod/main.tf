@@ -6,7 +6,7 @@ provider "google" {
 
 
 variable "environment" {
-  description = "Environment: 'prod'"
+  description = "Environment: 'stage'"
   type        = string
   default     = "stage"
 }
@@ -55,15 +55,15 @@ locals {
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
   xlsx_image                            = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:15.0.0"
   fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-271.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:69.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:71.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:34.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:36.0.0"
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
-  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:15.0.0"
-  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:16.0.0"
-  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:23.0.0"
-  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:17.0.0"
-  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:24.0.0"
+  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:17.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:18.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:26.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:20.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:26.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
