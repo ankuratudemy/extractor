@@ -57,17 +57,17 @@ locals {
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
   xlsx_image                           = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:15.0.0"
-  metadata_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/metadata:4.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-271.0.0"
+  metadata_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/metadata:5.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-276.0.0"
   indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:77.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:36.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:37.0.0"
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
-  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:17.0.0"
-  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:18.0.0"
-  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:26.0.0"
-  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:20.0.0"
-  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:26.0.0"
+  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:18.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:19.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:27.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:21.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:27.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -518,6 +518,77 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
       env {
         name  = "UPLOADS_FOLDER"
         value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+      }
+      env {
+        name = "REDIS_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "REDIS_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "PSQL_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_USERNAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_DATABASE"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+            version = "latest"
+          }
+        }
+
       }
       env {
         name = "REDIS_HOST"

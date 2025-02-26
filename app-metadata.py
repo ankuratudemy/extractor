@@ -133,7 +133,7 @@ def process_file():
                 )
                 # Possibly the model returns JSON wrapped in triple backticks
                 response_text = extract_json_from_markdown(response.text)
-
+                logging.info(f"Metadata Tags Generated:\n {response_text}")
                 # Try JSON parse
                 metadata_tags = json.loads(response_text)
                 break  # success

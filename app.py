@@ -22,7 +22,7 @@ from shared.bm25 import (
     compute_bm25_sparse_vector,
     get_project_vocab_stats,
     get_project_alpha,
-    hybrid_score_norm
+    hybrid_score_norm,
 )
 from langchain_core.outputs import LLMResult
 from langchain_google_vertexai.model_garden import ChatAnthropicVertex
@@ -31,7 +31,15 @@ callbacks = [FinalStreamingStdOutCallbackHandler()]
 from vertexai.preview.language_models import TextEmbeddingModel
 from urllib.parse import urlencode
 import json
-from shared import file_processor, google_auth, security, google_pub_sub, search_helper
+from shared import (
+    file_processor,
+    google_auth,
+    security,
+    google_pub_sub,
+    search_helper,
+    psql,
+)
+from shared.common_code import extract_json_from_markdown
 from types import FrameType
 import json
 import time
@@ -239,9 +247,11 @@ def get_event_loop():
     return loop
 
 
-def get_sparse_vector(query: str, project_id: str, vocab_stats: dict, max_terms: int) -> dict:
+def get_sparse_vector(
+    query: str, project_id: str, vocab_stats: dict, max_terms: int
+) -> dict:
 
-    # 1) Tokenize, 
+    # 1) Tokenize,
     tokens = tokenize_document(query)
     return compute_bm25_sparse_vector(
         tokens, project_id, vocab_stats, max_terms=max_terms
@@ -777,7 +787,7 @@ async def getVectorStoreDocs(request):
         # The last line or portion typically contains keywords as JSON or similar
         all_queries = [q.strip() for q in multi_query_resp.split("\n") if q.strip()]
         log.info(f"Generated Queries: {all_queries}")
-
+        first_query = all_queries[0]
         # We assume the last line is some JSON array of keywords or fallback
         keyword_query = all_queries[-1]
         try:
@@ -795,6 +805,25 @@ async def getVectorStoreDocs(request):
         log.error(str(e))
         raise Exception("There was an issue generating the answer. Please retry")
 
+    #  Fetch project row + parse metadataPrompt & metadataKeys
+    project_row = psql.get_project_details(project_id)
+    metadata_prompt = project_row.get("metadataPrompt", "")
+    metadata_keys = project_row.get("metadataKeys", [])
+    if isinstance(metadata_keys, str):
+        # if stored as JSON string
+        try:
+            metadata_keys = json.loads(metadata_keys)
+        except:
+            metadata_keys = []
+
+    # 3) Generate the metadata filter using our new function
+    metadata_filter = search_helper.generate_metadata_filter_advanced(
+        first_query=first_query,
+        metadata_prompt=metadata_prompt,
+        metadata_keys=metadata_keys,
+        google_genai_client=google_genai_client,
+    )
+    log.info(f"Generated Metadata filter {metadata_filter}")
     # ---------------------------------------------------------------------
     # 2) Batch-embed all queries for DENSE vectors
     # ---------------------------------------------------------------------
@@ -817,6 +846,7 @@ async def getVectorStoreDocs(request):
         raise Exception("There was an issue generating the answer. Please retry")
     # 2) Get BM25 stats
     vocab_stats = get_project_vocab_stats(project_id)
+
     def do_pinecone_query(dense_vec, query_str, vocab_stats):
         """
         Helper function that:
@@ -830,8 +860,8 @@ async def getVectorStoreDocs(request):
         # get project alpha
         alpha = get_project_alpha(vocab_stats)
         log.info(f"Alpha {alpha}")
-        #Get weghted dense, sparse vectors
-        dv,sv = hybrid_score_norm(dense=dense_vec, sparse=sparse_vec, alpha=alpha)
+        # Get weghted dense, sparse vectors
+        dv, sv = hybrid_score_norm(dense=dense_vec, sparse=sparse_vec, alpha=alpha)
         # Example format of sparse_vec:
         # {
         #    "indices": [...],
@@ -850,6 +880,22 @@ async def getVectorStoreDocs(request):
         )
         return response.to_dict().get("matches", [])
 
+    # Example usage if we do a hybrid search:
+    if metadata_filter:
+        meta_results = index.query(
+            namespace=project_id,
+            vector=embeddings_list[0],
+            top_k=topk,
+            include_values=False,
+            include_metadata=True,
+            filter=metadata_filter,  # <--- pass the dictionary
+        )
+        meta_results = meta_results.to_dict().get("matches", [])
+        # put these results at top
+    else:
+        # skip that search if filter is empty
+        meta_results = []
+    log.info(f"Metdata filter search result length# {len(meta_results)}")
     # We'll run the queries in parallel via ThreadPoolExecutor
     all_matches = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -899,6 +945,8 @@ async def getVectorStoreDocs(request):
     enc = tiktoken.get_encoding("cl100k_base")
     max_tokens = 50000
 
+    # add meta_results at top
+    doc_list = meta_results + doc_list
     topk_docs = []
     total_tokens = 0
     for doc in doc_list:
@@ -958,22 +1006,25 @@ def split_data(data, chunk_size):
     for i in range(0, len(data), chunk_size):
         yield data[i : i + chunk_size]
 
-@app.route('/askme', methods=['POST'])
-@limiter.limit(limit_value=lambda: getattr(request, 'tenant_data', {}).get('rate_limit', None),on_breach=default_error_responder)
+
+@app.route("/askme", methods=["POST"])
+@limiter.limit(
+    limit_value=lambda: getattr(request, "tenant_data", {}).get("rate_limit", None),
+    on_breach=default_error_responder,
+)
 def askme():
     try:
         data = request.get_json()
-        query = data.get('q')
-        sources = data.get('sources', [])
-        history = data.get('history', [])
+        query = data.get("q")
+        sources = data.get("sources", [])
+        history = data.get("history", [])
 
         docData = []
 
-        if 'vstore' in sources:
+        if "vstore" in sources:
             docData = asyncio.run(getVectorStoreDocs(request))
 
-        raw_context = (
-            f"""
+        raw_context = f"""
                 You are a helpful assistant.
                 Always respond to the user's question with a JSON object containing three keys:
                 - `response`: This key should have the final generated answer. Ensure the answer includes citations in the form of reference numbers (e.g., [1], [2]). Always start citation numbering from 1. Make sure this section is in markdown format.
@@ -987,23 +1038,30 @@ def askme():
                 Respond in JSON format. **Do not add** ```json at the beginning or ``` at the end of the response. The output must contain only JSON data, nothing else. **THIS IS VERY IMPORTANT.** Do not duplicate sources in the `sources` array.
                 """
 
-        )
-
         question = f"{query}"
-        #Build message for topic
+        # Build message for topic
         log.info(f"tenant data {getattr(request, 'tenant_data', {})}")
-        pubsub_message = json.dumps({
-        "subscription_id": getattr(request, 'tenant_data', {}).get('subscription_id', None),
-        "user_id": getattr(request, 'tenant_data', {}).get('user_id', None),
-        "keyName": getattr(request, 'tenant_data', {}).get('keyName', None),
-        "project_id": getattr(request, 'tenant_data', {}).get('project_id', None),
-        "creditsUsed": 35
-        })
+        pubsub_message = json.dumps(
+            {
+                "subscription_id": getattr(request, "tenant_data", {}).get(
+                    "subscription_id", None
+                ),
+                "user_id": getattr(request, "tenant_data", {}).get("user_id", None),
+                "keyName": getattr(request, "tenant_data", {}).get("keyName", None),
+                "project_id": getattr(request, "tenant_data", {}).get(
+                    "project_id", None
+                ),
+                "creditsUsed": 35,
+            }
+        )
         log.info(f"Averaged out credit usage for tokens: 25000")
         log.info(f" Chargeable creadits: 35")
         log.info(f"Message to topic: {pubsub_message}")
         # topic_headers = {"Authorization": f"Bearer {bearer_token}"}
-        google_pub_sub.publish_messages_with_retry_settings(GCP_PROJECT_ID,GCP_CREDIT_USAGE_TOPIC, message=pubsub_message)
+        google_pub_sub.publish_messages_with_retry_settings(
+            GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=pubsub_message
+        )
+
         def getAnswer():
 
             # class Source(BaseModel):
@@ -1042,23 +1100,20 @@ def askme():
             #     "type": "object",
             # }
 
-
             sync_response = google_genai_client.models.generate_content_stream(
-                                 model='gemini-2.0-flash-exp',
-                                 contents=question,
-                                 config= {
-                                 'system_instruction': raw_context,
-                                 'temperature': 0.3
-                                 }
-                            )
+                model="gemini-2.0-flash-exp",
+                contents=question,
+                config={"system_instruction": raw_context, "temperature": 0.3},
+            )
             for chunk in sync_response:
                 log.info(chunk)
                 yield chunk.text
 
-        return Response(stream_with_context(getAnswer()), mimetype='text/event-stream')
+        return Response(stream_with_context(getAnswer()), mimetype="text/event-stream")
     except Exception as e:
         log.error(str(e))
         raise Exception("There was an issue generating the answer. Please retry")
+
 
 async def get_google_embedding(queries):
     embedder_name = "text-multilingual-embedding-preview-0409"
