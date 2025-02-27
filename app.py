@@ -39,7 +39,6 @@ from shared import (
     search_helper,
     psql,
 )
-from shared.common_code import extract_json_from_markdown
 from types import FrameType
 import json
 import time
