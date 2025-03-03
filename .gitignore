@@ -216,3 +216,5 @@ override.tf.json
 .terraformrc
 terraform.rc
 Perplexica
+
+terraform/prod/function.zip
