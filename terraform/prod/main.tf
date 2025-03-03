@@ -2579,7 +2579,6 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
         image = local.s3_image # Docker image for your s3_ingest.py job
 
         # Example env vars
-
         env {
           name  = "SERVER_URL"
           value = local.environment == "prod" ? "be.api.structhub.io" : "stage-be.api.structhub.io"
