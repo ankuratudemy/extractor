@@ -36,6 +36,8 @@ langchain-google-vertexai
 anthropic[vertex]
 tiktoken
 google-genai
+psycopg2-binary
 typing-extensions
 pydantic
+google-cloud-firestore
 

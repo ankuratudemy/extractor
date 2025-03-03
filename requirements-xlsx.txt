@@ -6,7 +6,6 @@ aiohttp
 requests
 asyncio
 gunicorn
-PyMuPDF
 pandas
 openpyxl
 pyexcel 
@@ -20,10 +19,16 @@ flask_httpauth
 google-cloud-pubsub
 google-cloud-storage
 google-cloud-aiplatform
+google-cloud-firestore
 openai
 pyarmor
 cython
 psycopg2-binary
 tiktoken
 python-dateutil
-google-cloud-firestore
+azure-storage-blob
+azure-identity
+flask-cors
+tiktoken==0.7.0
+google-genai
+tabulate
