@@ -562,22 +562,6 @@ async def _call_xlsx_endpoint(
     with open(file_path, "rb") as f:
         file_content = f.read()
 
-    data = {
-        "project_id": project_id,
-        "sub_id": sub_for_hash,
-        **({"dataSourceId": data_source_id} if data_source_id is not None else {}),
-    }
-
-    form_data = aiohttp.FormData()
-    form_data.add_field(
-        "file",
-        file_content,
-        filename=base_name,
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    for k, v in data.items():
-        form_data.add_field(k, v)
-
     # Obtain a bearer token (outside the retry loop here, unless you need to refresh it each time)
     try:
         xlsx_bearer_token = google_auth.impersonated_id_token(
@@ -598,6 +582,19 @@ async def _call_xlsx_endpoint(
     attempts = 0
     while attempts < max_retries:
         try:
+            # Create a new FormData instance inside the retry loop
+            form_data = aiohttp.FormData()
+            form_data.add_field(
+                "file",
+                file_content,  # Use fresh bytes
+                filename=base_name,
+                # content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            form_data.add_field("project_id", project_id)
+            form_data.add_field("sub_id", sub_for_hash)
+            if data_source_id is not None:
+                form_data.add_field("dataSourceId", data_source_id)
+
             async with session.post(
                 xlsx_flask_url, data=form_data, headers=headers
             ) as resp:
