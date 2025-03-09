@@ -27,3 +27,4 @@ psycopg2-binary
 tiktoken
 python-dateutil
 google-cloud-firestore
+google-genai

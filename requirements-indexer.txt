@@ -26,3 +26,4 @@ cython
 psycopg2-binary
 tiktoken
 google-cloud-firestore
+google-genai

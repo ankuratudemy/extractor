@@ -15,6 +15,7 @@ import tiktoken
 import subprocess
 from dateutil import parser
 from typing import List, Tuple
+
 from shared.logging_config import log
 from shared import psql, google_pub_sub, google_auth, file_processor
 from shared.bm25 import (
@@ -25,6 +26,12 @@ from shared.bm25 import (
 )
 from pinecone.grpc import PineconeGRPC as Pinecone
 from vertexai.preview.language_models import TextEmbeddingModel
+
+# ---------------------
+# Import the generate() function for topics (batch version now)
+# ---------------------
+from google import genai
+from google.genai import types
 
 # ----------------------------------------------------------------------------
 # ENV VARIABLES
@@ -50,23 +57,121 @@ XLSX_SERVER_URL = os.environ.get("XLSX_SERVER_URL", None)
 XLSX_SERVER_ENDPOINT = f"https://{XLSX_SERVER_URL}/process_spreadsheet"
 log.info(f"METADATA SERVER ENDPOINT {METADATA_ENDPOINT}")
 log.info(f"XLSX SERVER ENDPOINT {XLSX_SERVER_ENDPOINT}")
+
 # Initialize Pinecone
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 METADATA_SESSION = None
 
 
+# ----------------------------------------------------------------------------
+# NEW: Function to batch multiple chunks together for single LLM call
+# ----------------------------------------------------------------------------
+async def generate_topics_for_batch(chunks: List[str], topics_prompt: str, retries: int = 3):
+    """
+    Combine multiple text chunks into one LLM request to reduce overhead.
+    We ask the model to return a JSON *array of arrays*, each sub-array holding
+    the topics for the corresponding chunk index.
+    """
+    regions = [
+        "us-central1",
+        "us-east5",   # Columbus, Ohio
+        "us-south1",  # Dallas, Texas
+        "us-west4",   # Las Vegas, Nevada
+        "us-east1",   # Moncks Corner, SC
+        "us-east4",   # Northern Virginia
+        "us-west1"    # Oregon
+    ]
+
+    # Construct a prompt that instructs the model to output strictly valid JSON:
+    # an array of arrays, each sub-array is for the chunk at that index.
+    prompt_text = f"""{topics_prompt}
+
+We have {len(chunks)} distinct text chunks. For each chunk, produce a list of 5-100 important keywords or phrases, including variations like abbreviations, expansions, etc. 
+Return strictly valid JSON: an array of length={len(chunks)}, where element i is a (string) list of topics for chunk i.
+
+Chunks:
+{json.dumps(chunks, ensure_ascii=False)}
+
+Return only the JSON.
+"""
+
+    text_part = types.Part.from_text(text=prompt_text)
+    model = "gemini-2.0-flash-lite-001"
+
+    contents = [types.Content(role="user", parts=[text_part])]
+
+    # Important: response_schema indicates we expect a list-of-lists-of-strings
+    generate_content_config = types.GenerateContentConfig(
+        temperature=0.5,
+        top_p=0.95,
+        max_output_tokens=8192,
+        response_modalities=["TEXT"],
+        response_mime_type="application/json",
+        response_schema={
+            "type": "array",
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            }
+        },
+    )
+
+    for region in regions:
+        client = genai.Client(
+            vertexai=True,
+            project=os.environ.get("GCP_PROJECT_ID"),
+            location=region,
+        )
+
+        attempt = 0
+        while attempt < retries:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=generate_content_config,
+                )
+                # The response should be a JSON array of arrays if successful
+                text_result = response.text
+                try:
+                    parsed = json.loads(text_result)
+                    # parsed should be a list of lists
+                    return parsed
+                except json.JSONDecodeError:
+                    log.error(f"[Topics] Could not parse LLM output as JSON in region={region}.")
+                    # Fallback: return empty array-of-arrays
+                    return [[] for _ in chunks]
+
+            except Exception as e:
+                error_message = str(e)
+                print(f"Attempt {attempt + 1} in region {region} failed: {error_message}")
+                if "429" in error_message:
+                    print(f"Region {region} rate limited, switching to next region.")
+                    break  # Break inner loop, move to next region
+                attempt += 1
+                await asyncio.sleep(2 ** attempt)
+
+    log.error("[Topics] All region attempts failed. Returning empty arrays.")
+    return [[] for _ in chunks]
+
+
+# ----------------------------------------------------------------------------
+# METADATA FETCH
+# ----------------------------------------------------------------------------
 async def fetch_additional_metadata(
     file_path: str, file_id: str, project_id: str, sub_id: str
 ) -> dict:
     global METADATA_SESSION
 
-    # If we don't have a metadata server configured, just skip
+    # If no metadata server configured, skip
     if not METADATA_ENDPOINT:
         log.info("[Metadata] METADATA_SERVER_URL not set. Skipping metadata fetch.")
         return {}
 
-    # If the global session is None or closed, create/recreate it with high timeouts
+    # Recreate session if needed
     if METADATA_SESSION is None or METADATA_SESSION.closed:
         # e.g. 10 minutes total, 30s connect, 30s DNS resolution, 600s read
         timeout = aiohttp.ClientTimeout(
@@ -76,9 +181,7 @@ async def fetch_additional_metadata(
 
     # Load file into memory
     if not os.path.exists(file_path):
-        log.warning(
-            f"[Metadata] File {file_path} does not exist. Cannot fetch metadata."
-        )
+        log.warning(f"[Metadata] File {file_path} does not exist. Cannot fetch metadata.")
         return {}
 
     with open(file_path, "rb") as f:
@@ -89,15 +192,13 @@ async def fetch_additional_metadata(
     form_data.add_field("project_id", str(project_id))
     form_data.add_field("sub_id", str(sub_id))
 
-    # If you need a Bearer token for METADATA_ENDPOINT:
+    # Bearer token for METADATA_ENDPOINT
     try:
         metadata_bearer_token = google_auth.impersonated_id_token(
             serverurl=METADATA_SERVER_URL
         ).json()["token"]
     except Exception as exc:
-        log.exception(
-            "[Metadata] Failed to get impersonated token for metadata server:"
-        )
+        log.exception("[Metadata] Failed to get impersonated token for metadata server:")
         return {}
 
     headers = {
@@ -113,8 +214,8 @@ async def fetch_additional_metadata(
             ) as resp:
                 if resp.status == 429 or (500 <= resp.status < 600):
                     log.warning(
-                        f"[Metadata] Received status={resp.status} from /metadata. "
-                        f"Retrying {attempt+1}/{max_retries}."
+                        f"[Metadata] status={resp.status} from /metadata. "
+                        f"Retry {attempt+1}/{max_retries}."
                     )
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
@@ -129,9 +230,7 @@ async def fetch_additional_metadata(
                     log.info("[Metadata] /metadata returned empty JSON.")
                     return {}
                 else:
-                    log.info(
-                        f"[Metadata] Successfully fetched metadata for file_id={file_id}."
-                    )
+                    log.info(f"[Metadata] Successfully fetched metadata for file_id={file_id}.")
                     return response_data
 
         except Exception:
@@ -144,9 +243,6 @@ async def fetch_additional_metadata(
 
 
 def parse_last_sync_time(last_sync_time_value):
-    """
-    Safely parse a lastSyncTime value (string or datetime) into a timezone-aware datetime or return None.
-    """
     if isinstance(last_sync_time_value, datetime):
         return ensure_timezone_aware(last_sync_time_value)
     if isinstance(last_sync_time_value, str):
@@ -158,10 +254,6 @@ def parse_last_sync_time(last_sync_time_value):
 
 
 def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) -> dict:
-    """
-    Convert the combined text of a document into a BM25 sparse vector for Pinecone,
-    which helps with hybrid search (dense + sparse).
-    """
     combined_text = " ".join(file_texts)
     tokens = tokenize_document(combined_text)
     publish_partial_bm25_update(project_id, tokens, is_new_doc=True)
@@ -172,6 +264,7 @@ def get_sparse_vector(file_texts: list[str], project_id: str, max_terms: int) ->
 
 
 def ensure_timezone_aware(dt):
+    CENTRAL_TZ = ZoneInfo("America/Chicago")
     if dt and dt.tzinfo is None:
         return dt.replace(tzinfo=CENTRAL_TZ)
     return dt
@@ -193,6 +286,7 @@ def generate_md5_hash(*args):
 
 
 def compute_next_sync_time(from_date: datetime, sync_option: str = None) -> datetime:
+    CENTRAL_TZ = ZoneInfo("America/Chicago")
     if not isinstance(from_date, datetime):
         from_date = datetime.now(CENTRAL_TZ)
     if not sync_option:
@@ -210,10 +304,6 @@ def compute_next_sync_time(from_date: datetime, sync_option: str = None) -> date
 
 
 def remove_file_from_db_and_pinecone(file_id, ds_id, project_id, namespace):
-    """
-    Remove the file from the PostgreSQL database and also remove any vectors
-    in Pinecone that have the prefix ds_id#file_id#.
-    """
     vector_id_prefix = f"{ds_id}#{file_id}#"
     try:
         for ids in index.list(prefix=vector_id_prefix, namespace=namespace):
@@ -233,9 +323,6 @@ def remove_file_from_db_and_pinecone(file_id, ds_id, project_id, namespace):
 def remove_missing_files(
     db_file_keys, remote_file_keys, data_source_id, project_id, namespace=None
 ):
-    """
-    Remove from DB and Pinecone any files that no longer exist in the remote source.
-    """
     removed_keys = db_file_keys - remote_file_keys
     log.info(f"Removed keys: {removed_keys}")
     for r_key in removed_keys:
@@ -245,9 +332,6 @@ def remove_missing_files(
 
 
 def convert_to_pdf(file_path, file_extension):
-    """
-    Convert docx/pptx to PDF using LibreOffice, returning the PDF bytes.
-    """
     try:
         pdf_file_path = os.path.splitext(file_path)[0] + ".pdf"
         command = [
@@ -277,10 +361,6 @@ def convert_to_pdf(file_path, file_extension):
 
 
 async def _async_put_page(session, url, page_data, page_num, headers, max_retries=5):
-    """
-    Upload a single PDF page (as BytesIO) to the Tika server, handle 429/5xx retries,
-    and return the extracted text.
-    """
     retries = 0
     while retries < max_retries:
         try:
@@ -292,7 +372,6 @@ async def _async_put_page(session, url, page_data, page_num, headers, max_retrie
                 timeout=aiohttp.ClientTimeout(total=300),
             ) as resp:
                 if resp.status == 429 or (500 <= resp.status < 600):
-                    # Retry on 429 or any 5xx
                     log.warning(
                         f"[Tika] Received status={resp.status} for page={page_num}. "
                         f"Retry {retries+1}/{max_retries}..."
@@ -300,12 +379,9 @@ async def _async_put_page(session, url, page_data, page_num, headers, max_retrie
                     retries += 1
                     await asyncio.sleep(2 * retries)
                     continue
-                # If 2xx or 4xx other than 429, proceed
                 content = await resp.read()
                 text_content = content.decode("utf-8", errors="ignore")
-                log.info(
-                    f"[Tika] Page {page_num} => {len(text_content)} chars extracted."
-                )
+                log.info(f"[Tika] Page {page_num} => {len(text_content)} chars extracted.")
                 return text_content, page_num
 
         except (aiohttp.ClientError, ssl.SSLError, asyncio.TimeoutError):
@@ -315,10 +391,8 @@ async def _async_put_page(session, url, page_data, page_num, headers, max_retrie
             retries += 1
             await asyncio.sleep(2 * retries)
 
-    # If we get here, we exhausted our retries:
     msg = f"[Tika] Failed to process page {page_num} after {max_retries} retries."
     log.error(msg)
-    # Return something indicative
     return "", page_num
 
 
@@ -331,7 +405,7 @@ async def process_pages_async(
     data_source_id,
     last_modified,
     sourceType,
-    additional_metadata=None,  # <--- new
+    additional_metadata=None,
 ):
     if not SERVER_URL:
         raise ValueError("SERVER_URL is not set, cannot call Tika.")
@@ -352,16 +426,12 @@ async def process_pages_async(
         data_source_id,
         last_modified,
         sourceType,
-        additional_metadata=additional_metadata,  # <--- pass here
+        additional_metadata=additional_metadata,
     )
-    return results  # In case we need to pass back to caller
+    return results
 
 
 def chunk_text(text, max_tokens=2048, overlap_chars=2000):
-    """
-    Splits a single string into overlapping chunks based on a max token size.
-    Prevents losing semantic context from chunk to chunk.
-    """
     enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)
     token_count = len(tokens)
@@ -390,6 +460,14 @@ def chunk_text(text, max_tokens=2048, overlap_chars=2000):
     return chunks
 
 
+# ----------------------------------------------------------------------------
+# NEW: Helper for sub-batching lists in groups of 'size=50'
+# ----------------------------------------------------------------------------
+def chunk_list(data, size=50):
+    for i in range(0, len(data), size):
+        yield data[i : i + size]
+
+
 async def process_embedding_batch(
     batch,
     filename,
@@ -402,18 +480,38 @@ async def process_embedding_batch(
     additional_metadata=None,
 ):
     """
-    Sends a batch of chunked text to the embedding model, builds Pinecone
-    vectors, then upserts them.
+    Sends a batch of chunked text to the embedding model, then calls the
+    LLM for topics in sub-batches of size=50. Then upserts to Pinecone.
     """
     texts = [item[0] for item in batch]
+
+    # 1) Embeddings for all chunked text:
     embeddings = await get_google_embedding(texts)
 
+    # 2) Generate topics in sub-batches to avoid token-limit blowups.
+    TOPICS_PROMPT = (
+        "From the following text chunks, extract the most important keywords or key phrases "
+        "(5-100 terms). Also include variations, abbreviations, expansions, etc. "
+        "Return strictly valid JSON as an array-of-arrays, each sub-array for one chunk."
+    )
+    all_topics = []
+
+    # We'll gather topic results for each chunk in the same order
+    text_index = 0
+    while text_index < len(texts):
+        sub_batch_texts = texts[text_index : text_index + 50]  # up to 50
+        sub_topics = await generate_topics_for_batch(sub_batch_texts, TOPICS_PROMPT)
+        all_topics.extend(sub_topics)
+        text_index += 50
+
+    # 3) Build vectors and upsert
     vectors = []
-    for (text, page_num, chunk_idx), embedding in zip(batch, embeddings):
+    for ((text, page_num, chunk_idx), embedding, parsed_topics) in zip(batch, embeddings, all_topics):
         if data_source_id:
             doc_id = f"{data_source_id}#{file_id}#{page_num}#{chunk_idx}"
         else:
             doc_id = f"{file_id}#{page_num}#{chunk_idx}"
+
         metadata = {
             "text": text,
             "source": filename,
@@ -425,11 +523,16 @@ async def process_embedding_batch(
                 if hasattr(last_modified, "isoformat")
                 else str(last_modified)
             ),
-            **({"dataSourceId": data_source_id} if data_source_id is not None else {}),
         }
-        # Attach any additional key-value pairs from the metadata JSON
+        if data_source_id is not None:
+            metadata["dataSourceId"] = data_source_id
+
+        # Attach any additional metadata fields
         if additional_metadata and "metadataTags" in additional_metadata:
             metadata.update(additional_metadata["metadataTags"])
+
+        # Attach parsed topics
+        metadata["auto_topics"] = parsed_topics
 
         vectors.append(
             {
@@ -444,12 +547,7 @@ async def process_embedding_batch(
     index.upsert(vectors=vectors, namespace=namespace)
 
 
-async def get_google_embedding(
-    queries, model_name="text-multilingual-embedding-preview-0409"
-):
-    """
-    Uses Vertex AI PaLM to generate embeddings for a list of text queries.
-    """
+async def get_google_embedding(queries, model_name="text-multilingual-embedding-preview-0409"):
     model = TextEmbeddingModel.from_pretrained(model_name)
     embeddings_list = model.get_embeddings(texts=queries, auto_truncate=True)
     return [emb.values for emb in embeddings_list]
@@ -467,7 +565,8 @@ async def create_and_upload_embeddings_in_batches(
 ):
     """
     Takes raw extracted text from all pages, splits each text into chunks,
-    and sends them to process_embedding_batch in manageable batches.
+    and sends them (in manageable batch sizes) to process_embedding_batch.
+    Also calls generate_topics_for_batch in sub-batches of 50.
     """
     batch = []
     batch_token_count = 0
@@ -476,7 +575,7 @@ async def create_and_upload_embeddings_in_batches(
     max_batch_tokens = 14000
     enc = tiktoken.get_encoding("cl100k_base")
 
-    # Single-file BM25 update for all pages
+    # Single-file BM25 update
     all_file_texts = [text for (text, _page_num) in results if text.strip()]
     sparse_values = get_sparse_vector(all_file_texts, namespace, 300)
 
@@ -507,7 +606,6 @@ async def create_and_upload_embeddings_in_batches(
                     batch_text_count = 0
                     batch_token_count = 0
 
-            # Try to add current chunk
             if ((batch_text_count + 1) <= max_batch_texts) and (
                 (batch_token_count + chunk_token_len) <= max_batch_tokens
             ):
@@ -515,9 +613,7 @@ async def create_and_upload_embeddings_in_batches(
                 batch_text_count += 1
                 batch_token_count += chunk_token_len
             else:
-                log.warning(
-                    "[Embed] Chunk too large or logic error prevented batch addition."
-                )
+                log.warning("[Embed] Chunk too large or logic error prevented batch addition.")
                 continue
 
     # Flush any remaining chunk batch
@@ -531,6 +627,7 @@ async def create_and_upload_embeddings_in_batches(
             last_modified,
             sparse_values,
             sourceType,
+            additional_metadata,
         )
         batch.clear()
 
@@ -538,8 +635,6 @@ async def create_and_upload_embeddings_in_batches(
 # ----------------------------------------------------------------------------
 # XLSX HELPER => We'll do parallel calls to XLSX_SERVER_ENDPOINT
 # ----------------------------------------------------------------------------
-
-
 async def _call_xlsx_endpoint(
     session,
     xlsx_flask_url,
@@ -550,19 +645,9 @@ async def _call_xlsx_endpoint(
     sub_for_hash,
     max_retries=5,
 ):
-    """
-    A helper that:
-    1) Reads the XLSX from local disk
-    2) Posts it to XLSX_SERVER_ENDPOINT
-    3) Retries on 429 or 5xx, up to max_retries
-    4) Returns (status_code, response_text or response_json)
-    """
-
-    # Read file from disk
     with open(file_path, "rb") as f:
         file_content = f.read()
 
-    # Obtain a bearer token (outside the retry loop here, unless you need to refresh it each time)
     try:
         xlsx_bearer_token = google_auth.impersonated_id_token(
             serverurl=XLSX_SERVER_URL
@@ -578,17 +663,14 @@ async def _call_xlsx_endpoint(
         "Accept": "text/plain",
     }
 
-    # Retry loop
     attempts = 0
     while attempts < max_retries:
         try:
-            # Create a new FormData instance inside the retry loop
             form_data = aiohttp.FormData()
             form_data.add_field(
                 "file",
-                file_content,  # Use fresh bytes
+                file_content,
                 filename=base_name,
-                # content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
             form_data.add_field("project_id", project_id)
             form_data.add_field("sub_id", sub_for_hash)
@@ -605,37 +687,26 @@ async def _call_xlsx_endpoint(
                     js = await resp.text()
 
                 if status == 429 or (500 <= status < 600):
-                    # Retry on 429 or 5xx
                     log.warning(
-                        f"[XLSX] Received status={status} from XLSX server. "
-                        f"Retry {attempts+1}/{max_retries}..."
+                        f"[XLSX] status={status} from server. Retry {attempts+1}/{max_retries}..."
                     )
                     attempts += 1
                     await asyncio.sleep(2 * attempts)
                     continue
 
-                # Otherwise, return whatever we got (200, 201, 4xx except 429, etc.)
                 return (status, js)
 
         except Exception:
-            # Log and retry
-            log.exception(
-                f"[XLSX] Exception while calling XLSX endpoint (attempt {attempts+1}/{max_retries}):"
-            )
+            log.exception(f"[XLSX] Exception calling XLSX endpoint (attempt {attempts+1}/{max_retries}):")
             attempts += 1
             await asyncio.sleep(2 * attempts)
 
-    # If we get here, we've exceeded retries
     msg = f"[XLSX] Max retries ({max_retries}) exceeded while posting XLSX file."
     log.error(msg)
     return (500, msg)
 
 
 def fetch_tika_bearer_token():
-    """
-    Fetch a Bearer token from Google Auth for Tika usage.
-    Returns the token string, or raises an exception.
-    """
     try:
         token_json = google_auth.impersonated_id_token(serverurl=SERVER_DOMAIN).json()
         return token_json["token"]
@@ -653,12 +724,6 @@ async def handle_xlsx_blob_async(
     sub_for_hash,
     sub_id,
 ):
-    """
-    Wraps your existing process_xlsx_blob call in an async context
-    so it can be used with asyncio.gather.
-    """
-    # This corresponds to your "process_xlsx_blob" from your code
-    # and returns (final_status, usage_credits, error_msg)
     try:
         return await process_xlsx_blob(
             file_key,
@@ -683,23 +748,18 @@ async def process_xlsx_blob(
     sub_for_hash,
     sub_id,
 ):
-    """
-    High-level XLSX ingestion that opens a session and calls _call_xlsx_endpoint,
-    returning final status/credits/error_msg.
-    """
     final_status = "failed"
     usage_credits = 0
     error_msg = ""
 
     xlsx_flask_url = XLSX_SERVER_ENDPOINT
 
-    # Create a brand new session each time we process a single XLSX
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(
-            total=3600,  # Total timeout for entire operation
-            sock_read=3600,  # Specifically set read timeout
-            connect=30,  # Time to connect to server
-            sock_connect=30,  # Time to connect socket
+            total=3600,
+            sock_read=3600,
+            connect=30,
+            sock_connect=30,
         )
     ) as session:
         try:
@@ -714,7 +774,6 @@ async def process_xlsx_blob(
                 max_retries=5,
             )
 
-            # Clean up local file if it exists
             if os.path.exists(local_tmp_path):
                 os.remove(local_tmp_path)
 
@@ -725,26 +784,18 @@ async def process_xlsx_blob(
                 else:
                     usage_credits = 0
             else:
-                error_msg = (
-                    f"[XLSX] Ingest error: status={status_code}, resp={response_data}"
-                )
+                error_msg = f"[XLSX] Ingest error: status={status_code}, resp={response_data}"
 
         except Exception:
-            # Log full traceback
             log.exception("[XLSX] Exception calling XLSX ingestion:")
             if os.path.exists(local_tmp_path):
                 os.remove(local_tmp_path)
-            error_msg = "Exception calling XLSX ingestion (see logs for traceback)."
+            error_msg = "Exception calling XLSX ingestion (see logs)."
 
-    # session closes automatically here
     return (final_status, usage_credits, error_msg)
 
 
 def finalize_data_source(data_source_id, ds, new_status="processed"):
-    """
-    Helper to finalize the data source after processing is done,
-    setting lastSyncTime and nextSyncTime, etc.
-    """
     now_dt = datetime.now(CENTRAL_TZ)
     next_sync = compute_next_sync_time(now_dt, ds.get("syncOption"))
     psql.update_data_source_by_id(
@@ -756,29 +807,17 @@ def finalize_data_source(data_source_id, ds, new_status="processed"):
 
 
 def determine_file_extension(filename, default_ext="pdf"):
-    """
-    Determine the file extension by looking at the filename.
-    If none found, return `default_ext`.
-    """
     if "." in filename:
         return filename.rsplit(".", 1)[-1].lower()
     return default_ext
 
 
 def process_local_file(local_tmp_path, extension):
-    """
-    Convert/transform the file at local_tmp_path into a list of (pageNum, io.BytesIO) pages.
-    This function handles PDF, docx->PDF conversion, images as single-page, email formats, ODS, etc.
-
-    Returns: (final_pages, final_num_pages)
-    """
-    # For PDF
     if extension == "pdf":
         with open(local_tmp_path, "rb") as f_in:
             pdf_data = f_in.read()
         return file_processor.split_pdf(pdf_data)
 
-    # Convert to PDF from docx/pptx/etc.
     elif extension in [
         "docx",
         "odt",
@@ -815,28 +854,24 @@ def process_local_file(local_tmp_path, extension):
         else:
             raise ValueError(f"Conversion to PDF failed for extension: {extension}")
 
-    # Images
     elif extension in ["jpg", "jpeg", "png", "gif", "tiff", "bmp"]:
         with open(local_tmp_path, "rb") as f:
             image_data = f.read()
         pages = [("1", io.BytesIO(image_data))]
         return pages, len(pages)
 
-    # Email formats
     elif extension in ["eml", "msg", "pst", "ost", "mbox", "dbx", "dat", "emlx"]:
         with open(local_tmp_path, "rb") as f:
             msg_data = f.read()
         pages = [("1", io.BytesIO(msg_data))]
         return pages, len(pages)
 
-    # ODS
-    elif extension == "ods":
+    elif extension == ["ods"]:
         with open(local_tmp_path, "rb") as f:
             ods_data = f.read()
         pages = file_processor.split_ods(ods_data)
         return pages, len(pages)
 
-    # If none match
     else:
         raise ValueError(f"Unsupported file extension: {extension}")
 
@@ -852,27 +887,13 @@ def process_file_with_tika(
     source_type,
     sub_id,
 ):
-    """
-    Complete flow:
-      1. Convert/split local file into pages.
-      2. Fetch metadata FIRST.
-      3. Then call Tika extraction + embedding, passing metadata as additional_metadata.
-      4. If metadata is non-empty, store in DB.
-      5. Return (final_status, number_of_pages, error_msg).
-    """
     now_dt_str = datetime.now(CENTRAL_TZ).isoformat()
 
     try:
         final_pages, final_num_pages = process_local_file(local_tmp_path, extension)
     except Exception as e:
-        log.error(
-            f"[process_file_with_tika] Failed to process/convert {base_name}: {str(e)}"
-        )
+        log.error(f"[process_file_with_tika] Failed to process/convert {base_name}: {str(e)}")
         return ("failed", 0, str(e))
-
-    # If you want to remove the local file afterwards:
-    # But note we need it for fetch_additional_metadata
-    # We keep it for now.
 
     try:
         bearer_token = fetch_tika_bearer_token()
@@ -888,7 +909,6 @@ def process_file_with_tika(
     loop = get_event_loop()
 
     async def run_tasks_sequential():
-        # 1) Fetch metadata
         metadata_json = await fetch_additional_metadata(
             file_path=local_tmp_path,
             file_id=file_key,
@@ -896,7 +916,6 @@ def process_file_with_tika(
             sub_id=sub_id or "no_subscription",
         )
 
-        # 2) Now do Tika extraction + embedding, passing metadata as additional_metadata
         extracted_pages = await process_pages_async(
             pages=final_pages,
             headers=headers,
@@ -906,29 +925,24 @@ def process_file_with_tika(
             data_source_id=data_source_id,
             last_modified=last_modified,
             sourceType=source_type,
-            additional_metadata=metadata_json,  # <--- pass it here
+            additional_metadata=metadata_json,
         )
-
         return extracted_pages, metadata_json
 
     try:
         results, metadata_json = loop.run_until_complete(run_tasks_sequential())
     except Exception as e:
-        log.exception(
-            f"[process_file_with_tika] Tika/metadata flow failed for {base_name}:"
-        )
+        log.exception(f"[process_file_with_tika] Tika/metadata flow failed for {base_name}:")
         return ("failed", 0, str(e))
     finally:
-        # Clean up the local file
         if os.path.exists(local_tmp_path):
             os.remove(local_tmp_path)
 
-    # results is a list of (extracted_text, page_num).
+    # results => list of (extracted_text, page_num)
     psql.update_file_by_id(
         file_key, status="processed", pageCount=len(results), updatedAt=now_dt_str
     )
 
-    # If we have metadata, store it in DB
     if metadata_json and "metadataTags" in metadata_json:
         try:
             psql.update_file_generated_metadata(file_key, metadata_json["metadataTags"])

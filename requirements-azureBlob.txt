@@ -29,3 +29,4 @@ tiktoken
 python-dateutil
 azure-storage-blob
 azure-identity
+google-genai
