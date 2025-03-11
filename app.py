@@ -8,6 +8,7 @@ import ssl
 import signal
 import asyncio
 import concurrent.futures
+from datetime import datetime
 
 from flask import Flask, request, Response, stream_with_context
 from flask_cors import CORS
@@ -48,6 +49,9 @@ from shared import (
 )
 
 from shared.logging_config import log
+
+# For robust date parsing
+from dateutil.parser import parse as dateutil_parse, ParserError
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -211,13 +215,38 @@ Text to analyze:
         log.warning(f"[generate_query_keywords] LLM call failed: {str(e)}")
         return []
 
+def convert_dates_for_metadata_filter(filter_dict: dict, metadata_keys: list) -> dict:
+    """
+    Given the metadata filter (a dictionary) and the list of metadata_keys from DB,
+    convert values to a Unix timestamp if:
+      - The key exists in the filter,
+      - Its type in metadata_keys is defined as 'Date', and
+      - The value is a string that can be parsed as a date.
+    If conversion fails, leave the original value.
+    """
+    db_key_map = {}
+    for mk in metadata_keys:
+        k = mk.get("key")
+        t = mk.get("type")
+        if k and t:
+            db_key_map[k] = t
+
+    for key, value in filter_dict.items():
+        if key in db_key_map and db_key_map[key] == "Date":
+            if isinstance(value, str):
+                try:
+                    dt = dateutil_parse(value)
+                    filter_dict[key] = int(dt.timestamp())
+                except (ParserError, ValueError):
+                    pass
+    return filter_dict
+
 # ====================================================================================
 # HEALTH
 # ====================================================================================
 @app.route("/health", methods=["GET"], endpoint="health_check")
 def health_check():
     return json.dumps({"status": "ok"})
-
 
 # ====================================================================================
 # MAIN SEARCH ROUTINE (async)
@@ -285,9 +314,11 @@ async def getVectorStoreDocs(request):
         metadata_keys=metadata_keys,
         google_genai_client=google_genai_client,
     )
+    # Once metadata filter is created, convert all Date types to Unix timestamp.
+    if metadata_filter:
+        metadata_filter = convert_dates_for_metadata_filter(metadata_filter, metadata_keys)
 
     # 3) Generate array of keywords from user query+history for auto_topics
-    #    Make it async to avoid blocking.
     auto_topics_list = await asyncio.to_thread(generate_query_keywords, query, history)
 
     # 4) Create embeddings for the multi-query approach
@@ -299,8 +330,6 @@ async def getVectorStoreDocs(request):
     index = pc.IndexAsyncio(host=indexModel.index.host)
     vocab_stats = get_project_vocab_stats(project_id)
     alpha = get_project_alpha(vocab_stats)
-
-    # Define async helpers that await the pinecone index query:
 
     async def do_pinecone_multi_query(dense_vec, query_str):
         sparse_vec = get_sparse_vector(query_str, project_id, vocab_stats, 300)
@@ -342,7 +371,6 @@ async def getVectorStoreDocs(request):
 
     combined_filter_2 = metadata_filter if metadata_filter else {}
 
-    # We'll do the multi-query approach:
     async def run_multi_queries():
         all_hits = []
         tasks = []
@@ -356,10 +384,7 @@ async def getVectorStoreDocs(request):
                 log.warning(f"[multi-query error] {str(r)}")
         return all_hits
 
-    # 6) Run all searches in parallel
-    #    We'll keep track of results_1, results_2, results_3 with the same logic:
     tasks = []
-    # We'll store them in a list of (task, label) so we know which is which
     run_filters = []
     if combined_filter_1:
         run_filters.append(("filter_1", do_metadata_filter_query(
@@ -371,7 +396,6 @@ async def getVectorStoreDocs(request):
         )))
     run_filters.append(("multi_query", run_multi_queries()))
 
-    # Gather them
     results_map = {}
     tasks_labels = [asyncio.create_task(coro, name=label) for (label, coro) in run_filters]
     done, pending = await asyncio.wait(tasks_labels, return_when=asyncio.ALL_COMPLETED)
@@ -387,7 +411,6 @@ async def getVectorStoreDocs(request):
     results_2 = results_map.get("filter_2", [])
     results_3 = results_map.get("multi_query", [])
 
-    # 7) Merge in order
     unique_docs = {}
     final_merged = []
 
@@ -407,10 +430,8 @@ async def getVectorStoreDocs(request):
             unique_docs[doc_id] = True
             final_merged.append(doc)
 
-    # 8) Apply top-K or token limit
     import tiktoken
     enc = tiktoken.get_encoding("cl100k_base")
-
     max_tokens = 200000
     topk_docs = []
     total_tokens = 0
@@ -424,7 +445,6 @@ async def getVectorStoreDocs(request):
         topk_docs.append(doc)
         total_tokens += doc_tokens
 
-    # 9) Publish usage metrics asynchronously
     async def publish_credits():
         count = len(topk_docs)
         message = json.dumps(
@@ -441,10 +461,7 @@ async def getVectorStoreDocs(request):
         )
 
     asyncio.create_task(publish_credits())
-
-    # Return JSON
     return json.dumps(topk_docs), 200
-
 
 # ====================================================================================
 # ASKME ENDPOINT
@@ -465,14 +482,10 @@ def askme():
         query = data.get("q")
         sources = data.get("sources", [])
         history = data.get("history", [])
-
         docData = "[]"
         if "vstore" in sources:
-            # We run the new asynchronous vector store retrieval
             loop = get_event_loop()
             docData, _status_code = loop.run_until_complete(getVectorStoreDocs(request))
-
-        # Build a system instruction:
         raw_context = f"""
         You are a helpful assistant.
         Always respond to the user's question with a JSON object containing three keys:
@@ -486,10 +499,7 @@ def askme():
 
         Always respond only in valid JSON. No extra code fences.
         """
-
         question = f"{query}"
-
-        # Credits usage for the final LLM call
         pubsub_message = json.dumps(
             {
                 "subscription_id": getattr(request, "tenant_data", {}).get("subscription_id", None),
@@ -502,7 +512,6 @@ def askme():
         google_pub_sub.publish_messages_with_retry_settings(
             GCP_PROJECT_ID, GCP_CREDIT_USAGE_TOPIC, message=pubsub_message
         )
-
         def getAnswer():
             sync_response = google_genai_client.models.generate_content_stream(
                 model="gemini-2.0-flash",
@@ -512,17 +521,14 @@ def askme():
             for chunk in sync_response:
                 log.info(chunk)
                 yield chunk.text
-
         response = Response(stream_with_context(getAnswer()), mimetype="text/event-stream")
         response.headers["Cache-Control"] = "no-cache, no-transform"
         response.headers["X-Accel-Buffering"] = "no"
         response.headers["Transfer-Encoding"] = "chunked"
         return response
-
     except Exception as e:
         log.error(str(e))
         raise Exception("There was an issue generating the answer. Please retry")
-
 
 # ====================================================================================
 # SHUTDOWN HANDLER
@@ -535,9 +541,7 @@ def shutdown_handler(signal_int: int, frame):
 # MAIN
 # ====================================================================================
 if __name__ == "__main__":
-    # Running locally
     signal.signal(signal.SIGINT, shutdown_handler)
     app.run(host="0.0.0.0", port=8080, debug=True)
 else:
-    # On Cloud Run
     signal.signal(signal.SIGTERM, shutdown_handler)

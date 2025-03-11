@@ -158,28 +158,21 @@ Return only the JSON.
     return [[] for _ in chunks]
 
 
-# ----------------------------------------------------------------------------
-# METADATA FETCH
-# ----------------------------------------------------------------------------
 async def fetch_additional_metadata(
     file_path: str, file_id: str, project_id: str, sub_id: str
 ) -> dict:
     global METADATA_SESSION
 
-    # If no metadata server configured, skip
     if not METADATA_ENDPOINT:
         log.info("[Metadata] METADATA_SERVER_URL not set. Skipping metadata fetch.")
         return {}
 
-    # Recreate session if needed
     if METADATA_SESSION is None or METADATA_SESSION.closed:
-        # e.g. 10 minutes total, 30s connect, 30s DNS resolution, 600s read
         timeout = aiohttp.ClientTimeout(
             total=600, connect=30, sock_connect=30, sock_read=600
         )
         METADATA_SESSION = aiohttp.ClientSession(timeout=timeout)
 
-    # Load file into memory
     if not os.path.exists(file_path):
         log.warning(f"[Metadata] File {file_path} does not exist. Cannot fetch metadata.")
         return {}
@@ -187,17 +180,11 @@ async def fetch_additional_metadata(
     with open(file_path, "rb") as f:
         file_content = f.read()
 
-    form_data = aiohttp.FormData()
-    form_data.add_field("file", file_content, filename=os.path.basename(file_path))
-    form_data.add_field("project_id", str(project_id))
-    form_data.add_field("sub_id", str(sub_id))
-
-    # Bearer token for METADATA_ENDPOINT
     try:
         metadata_bearer_token = google_auth.impersonated_id_token(
             serverurl=METADATA_SERVER_URL
         ).json()["token"]
-    except Exception as exc:
+    except Exception:
         log.exception("[Metadata] Failed to get impersonated token for metadata server:")
         return {}
 
@@ -209,6 +196,12 @@ async def fetch_additional_metadata(
     max_retries = 5
     for attempt in range(max_retries):
         try:
+            # IMPORTANT: Re‑create FormData each time before calling `post()`
+            form_data = aiohttp.FormData()
+            form_data.add_field("file", file_content, filename=os.path.basename(file_path))
+            form_data.add_field("project_id", str(project_id))
+            form_data.add_field("sub_id", str(sub_id))
+
             async with METADATA_SESSION.post(
                 METADATA_ENDPOINT, data=form_data, headers=headers
             ) as resp:
@@ -224,7 +217,6 @@ async def fetch_additional_metadata(
                     log.error(f"[Metadata] Non-success HTTP status: {resp.status}")
                     return {}
 
-                # Attempt to parse JSON
                 response_data = await resp.json()
                 if not response_data:
                     log.info("[Metadata] /metadata returned empty JSON.")
@@ -237,7 +229,6 @@ async def fetch_additional_metadata(
             log.exception("[Metadata] Exception in fetch_additional_metadata:")
             await asyncio.sleep(2 * (attempt + 1))
 
-    # If we exhausted retries
     log.error("[Metadata] Max retries exceeded for /metadata call.")
     return {}
 
