@@ -534,3 +534,58 @@ def update_file_generated_metadata(file_id, generated_metadata):
     except Exception as e:
         print(f"Error connecting to PostgreSQL: {str(e)}")
         sys.exit("Function execution failed.")
+
+def update_project(project_id, metadata_prompt=None, metadata_keys=None):
+    """
+    Updates the Project table record with the given project_id.
+    Allows updating metadataPrompt, metadataKeys, or both, if provided.
+    """
+    if not project_id:
+        raise ValueError("project_id is required.")
+    
+    updates = []
+    values = []
+    
+    # Only update columns that have a non-None value
+    if metadata_prompt is not None:
+        updates.append('"metadataPrompt" = %s')
+        values.append(metadata_prompt)
+    if metadata_keys is not None:
+        # Convert dict or list to JSON if needed, or store raw string if that's how you're storing it
+        if isinstance(metadata_keys, (dict, list)):
+            metadata_keys = json.dumps(metadata_keys)
+        updates.append('"metadataKeys" = %s')
+        values.append(metadata_keys)
+    
+    if not updates:
+        # Nothing to update
+        print("No updates requested for project.")
+        return "no_updates"
+    
+    set_clause = ", ".join(updates)
+    values.append(project_id)
+    
+    query = f'UPDATE "Project" SET {set_clause} WHERE "id" = %s'
+    
+    try:
+        with psycopg2.connect(**db_params) as connection:
+            with connection.cursor() as cursor:
+                connection.autocommit = False
+                lock_id = int(time.time() * 1000)
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
+
+                try:
+                    print(f"Updating Project {project_id} with: {updates}")
+                    cursor.execute(query, values)
+                    connection.commit()
+                    print("Transaction completed successfully.")
+                    return "success"
+
+                except Exception as e:
+                    connection.rollback()
+                    print(f"Error during update_project: {str(e)}")
+                    sys.exit("Function execution failed.")
+
+    except Exception as e:
+        print(f"Error connecting to PostgreSQL: {str(e)}")
+        sys.exit("Function execution failed.")
