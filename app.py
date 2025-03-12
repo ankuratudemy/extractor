@@ -411,6 +411,13 @@ async def getVectorStoreDocs(request):
     results_2 = results_map.get("filter_2", [])
     results_3 = results_map.get("multi_query", [])
 
+    # Logging the filters and document counts
+    log.info(f"Combined Filter 1: {combined_filter_1}")
+    log.info(f"Combined Filter 2: {combined_filter_2}")
+    log.info(f"Documents fetched for Filter 1: {len(results_1)}")
+    log.info(f"Documents fetched for Filter 2: {len(results_2)}")
+    log.info(f"Documents fetched for Multi-Query: {len(results_3)}")
+
     unique_docs = {}
     final_merged = []
 
