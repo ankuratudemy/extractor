@@ -24,9 +24,15 @@ locals {
   xlsx_cpu                             = 1
   xlsx_memory                          = "2Gi"
   xlsx_port                            = 9999
+  metadata_cpu                         = 1
+  metadata_memory                      = "2Gi"
+  metadata_port                        = 9997
   indexer_cpu                          = 1
   indexer_memory                       = "2Gi"
   indexer_port                         = 5000
+  metadata_keys_cpu                    = 1
+  metadata_keys_memory                 = "2Gi"
+  metadata_keys_port                  = 5000
   searxng_port                         = 8080
   confluence_cpu                       = 1
   confluence_memory                    = "2Gi"
@@ -53,17 +59,19 @@ locals {
   internal_ip_address_name_indexer     = "xtract-indexer-ip-name"
   external_ip_address_name_be          = "xtract-be-ip-name"
   be_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-be:17.0.0"
-  xlsx_image                            = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:15.0.0"
-  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-271.0.0"
-  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:71.0.0"
+  xlsx_image                           = "us-central1-docker.pkg.dev/structhub-412620/xtract/xlsx-indexer:16.0.0"
+  metadata_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/metadata:14.0.0"
+  fe_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-fe:gcr-289.0.0"
+  indexer_image                        = "us-central1-docker.pkg.dev/structhub-412620/xtract/xtract-indexer:90.0.0"
+  metadata_keys_image                  = "us-central1-docker.pkg.dev/structhub-412620/xtract/metadata-keys:8.0.0"
   websearch_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/searxng:6.0.0"
-  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:36.0.0"
+  gdrive_image                         = "us-central1-docker.pkg.dev/structhub-412620/xtract/googledrive-indexer:42.0.0"
   confluence_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/confluence-indexer-30.0.0"
-  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:17.0.0"
-  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:18.0.0"
-  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:26.0.0"
-  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:20.0.0"
-  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:26.0.0"
+  onedrive_image                       = "us-central1-docker.pkg.dev/structhub-412620/xtract/onedrive-indexer:23.0.0"
+  sharepoint_image                     = "us-central1-docker.pkg.dev/structhub-412620/xtract/sharepoint-indexer:24.0.0"
+  s3_image                             = "us-central1-docker.pkg.dev/structhub-412620/xtract/s3-indexer:32.0.0"
+  azureblob_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/azureblob-indexer:26.0.0"
+  gcpbucket_image                      = "us-central1-docker.pkg.dev/structhub-412620/xtract/gcpbucket-indexer:32.0.0"
   be_concurrent_requests_per_inst      = 1
   fe_concurrent_requests_per_inst      = 1
   indexer_concurrent_requests_per_inst = 1
@@ -71,15 +79,19 @@ locals {
   project_number                       = "485124114765"
   fe_service_name_prefix               = "xtract-fe"
   indexer_service_name_prefix          = "xtract-indexer"
+  metadata_keys_service_name_prefix    = "metadata-keys"
   be_service_name_prefix               = "xtract-be"
   xlsx_service_name_prefix             = "xlsx-be"
+  metadata_service_name_prefix         = "metadata-be"
   fe_hc_path                           = "/health"
   be_hc_path                           = "/tika"
   fe_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   indexer_domain_suffix                = local.environment == "prod" ? "" : "-stage"
+  metadata_keys_domain_suffix          = local.environment == "prod" ? "" : "-stage"
   be_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
   websearch_domain_suffix              = local.environment == "prod" ? "" : "-stage"
-  xlsx_domain_suffix                     = local.environment == "prod" ? "" : "-stage"
+  xlsx_domain_suffix                   = local.environment == "prod" ? "" : "-stage"
+  metadata_domain_suffix               = local.environment == "prod" ? "" : "-stage"
 
   region_instance_counts = {
     "northamerica-northeast1" = {
@@ -494,6 +506,10 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
       }
       env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
       }
@@ -526,6 +542,59 @@ resource "google_cloud_run_v2_service" "fe_cloud_run" {
             version = "latest"
           }
         }
+      }
+
+      env {
+        name = "PSQL_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_USERNAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_DATABASE"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+            version = "latest"
+          }
+        }
+
       }
       env {
         name = "SECRET_KEY"
@@ -823,6 +892,7 @@ resource "google_storage_bucket" "fileupload_bucket" {
   }
 }
 
+
 resource "google_project_iam_member" "indexer_pubsubpublisher" {
   project = local.project_id
   role    = "roles/pubsub.publisher"
@@ -863,6 +933,10 @@ resource "google_cloud_run_v2_service" "indexer_cloud_run" {
       env {
         name  = "XLSX_SERVER_URL"
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+      }
+      env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
       }
       env {
         name  = "GCP_PROJECT_ID"
@@ -1525,6 +1599,7 @@ resource "google_cloudfunctions2_function" "confluence_trigger_function" {
 
 
 # Google Drive
+
 # Create a Pub/Sub topic for Google drive Source
 resource "google_pubsub_topic" "gdrive_topic" {
   name = "gdrive-topic-${local.environment}"
@@ -1560,6 +1635,10 @@ resource "google_cloud_run_v2_job" "gdrive_cloud_run_job" {
         env {
         name  = "XLSX_SERVER_URL"
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -1881,6 +1960,10 @@ resource "google_cloud_run_v2_job" "onedrive_cloud_run_job" {
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
+        }
+        env {
           name  = "UPLOADS_FOLDER"
           value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
         }
@@ -2195,6 +2278,10 @@ resource "google_cloud_run_v2_job" "sharepoint_cloud_run_job" {
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
         }
         env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
+        }
+        env {
           name  = "UPLOADS_FOLDER"
           value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
         }
@@ -2489,7 +2576,6 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
   for_each = toset(local.us_regions)
 
   name                = "s3-job${local.indexer_domain_suffix}-${each.key}"
-  deletion_protection = false
   location            = each.key
 
   template {
@@ -2508,6 +2594,10 @@ resource "google_cloud_run_v2_job" "s3_cloud_run_job" {
         env {
         name  = "XLSX_SERVER_URL"
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -2790,6 +2880,10 @@ resource "google_cloud_run_v2_job" "gcpbucket_cloud_run_job" {
         env {
         name  = "XLSX_SERVER_URL"
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -3153,6 +3247,10 @@ resource "google_cloud_run_v2_job" "azureblob_cloud_run_job" {
         env {
         name  = "XLSX_SERVER_URL"
         value = local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"
+        }
+        env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
         }
         env {
           name  = "UPLOADS_FOLDER"
@@ -3556,5 +3654,481 @@ resource "google_cloud_run_v2_service" "xlsx_cloud_run" {
   custom_audiences = [local.environment == "prod" ? "xlsx.structhub.io" : "stage-xlsx.structhub.io"]
   depends_on = [
     google_project_service.run_api
+  ]
+}
+
+
+# Metadata tag service:
+
+resource "google_compute_region_network_endpoint_group" "metadata_backend" {
+  count                 = length(local.regions)
+  name                  = "${local.metadata_service_name_prefix}${local.metadata_domain_suffix}-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = local.regions[count.index]
+  cloud_run {
+    service = google_cloud_run_v2_service.metadata_cloud_run[local.regions[count.index]].name
+  }
+}
+
+
+resource "google_compute_global_address" "metadata_external_ip" {
+  name = "metadata${local.metadata_domain_suffix}-ip"
+}
+
+resource "google_compute_backend_service" "metadata_backend" {
+  name                            = "metadata${local.metadata_domain_suffix}-backend"
+  load_balancing_scheme           = "EXTERNAL_MANAGED"
+  connection_draining_timeout_sec = 3600
+  locality_lb_policy              = "RANDOM"
+  enable_cdn                      = false
+
+  dynamic "backend" {
+    for_each = local.regions
+
+    content {
+      group = google_compute_region_network_endpoint_group.metadata_backend[backend.key].id
+    }
+  }
+
+  depends_on = [
+    google_project_service.compute_api,
+  ]
+}
+
+
+resource "google_compute_managed_ssl_certificate" "metadata_ssl_cert" {
+  name = "metadata${local.metadata_domain_suffix}-cert"
+  managed {
+    domains = [local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"]
+  }
+}
+
+resource "google_compute_target_https_proxy" "metadata_https_proxy" {
+  name                        = "metadata${local.metadata_domain_suffix}-https"
+  ssl_certificates            = [google_compute_managed_ssl_certificate.metadata_ssl_cert.id]
+  url_map                     = google_compute_url_map.metadata_url_map.id
+  http_keep_alive_timeout_sec = 610
+
+  depends_on = [
+    google_compute_managed_ssl_certificate.metadata_ssl_cert
+  ]
+}
+
+resource "google_compute_url_map" "metadata_url_map" {
+  name            = "metadata${local.metadata_domain_suffix}"
+  default_service = google_compute_backend_service.metadata_backend.id
+}
+
+resource "google_compute_global_forwarding_rule" "metadata_forwarding_rule" {
+  name                  = "metadata${local.metadata_domain_suffix}-https"
+  target                = google_compute_target_https_proxy.metadata_https_proxy.id
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  ip_address            = google_compute_global_address.metadata_external_ip.id
+  port_range            = "443"
+  depends_on            = [google_compute_target_https_proxy.metadata_https_proxy]
+}
+
+resource "google_cloud_run_v2_service" "metadata_cloud_run" {
+  for_each = toset(local.regions)
+  
+  name     = "${local.metadata_service_name_prefix}${local.metadata_domain_suffix}-${each.key}"
+  
+  location = each.key
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  template {
+    service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+    scaling {
+      max_instance_count = local.region_instance_counts[each.key].be_max_inst
+      min_instance_count = local.region_instance_counts[each.key].be_min_inst
+    }
+    containers {
+      env {
+          name  = "GCP_PROJECT_ID"
+          value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+        }
+        env {
+        name  = "METADATA_FILEUPLOAD_BUCKET"
+        value = google_storage_bucket.metadata_fileupload_bucket.name
+      }
+        env {
+          name  = "GCP_CREDIT_USAGE_TOPIC"
+          value = "structhub-credit-usage-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "BM25_VOCAB_UPDATES_TOPIC"
+          value = "bm25-vocab-updater-topic${local.fe_domain_suffix}"
+        }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+        env {
+          name  = "ENVIRONMENT"
+          value = local.environment
+        }
+
+        env {
+          name = "PSQL_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_USERNAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_DATABASE"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PSQL_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_HOST"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "REDIS_PORT"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "PINECONE_INDEX_NAME"
+          value_source {
+            secret_key_ref {
+              secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+              version = "latest"
+            }
+          }
+        }
+      ports {
+        container_port = local.metadata_port
+      }
+      image = local.metadata_image
+      resources {
+        limits = {
+          cpu    = local.metadata_cpu
+          memory = local.metadata_memory
+        }
+      }
+    }
+    timeout                          = "3600s"  # 1 hour for metadata-indexer
+    max_instance_request_concurrency = 1  # Recommended for long-running tasks
+  }
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+  custom_audiences = [local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"]
+  depends_on = [
+    google_project_service.run_api
+  ]
+}
+
+
+resource "google_storage_bucket" "metadata_fileupload_bucket" {
+  name                        = "structhub-metadata-file-upload-bucket-${local.environment}"
+  location                    = "us"
+  uniform_bucket_level_access = true
+  cors {
+    origin          = ["https://stage.structhub.io", "http://localhost:3000", "https://structhub.io"]
+    method          = ["GET", "HEAD", "PUT", "POST", "DELETE"]
+    response_header = ["*"]
+    max_age_seconds = 3600
+  }
+}
+
+resource "google_storage_bucket_iam_binding" "metadata_bucket_access" {
+  bucket = google_storage_bucket.metadata_fileupload_bucket.name
+
+  role    = "roles/storage.objectAdmin"
+    members = [
+    "serviceAccount:xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com",
+  ]
+}
+
+# resource "google_service_account" "metadata_sa" {
+#   account_id   = "${local.environment}-metadata-sa"
+#   display_name = "Metadata Cloud Run SA (${local.environment})"
+# }
+
+
+## AUTO Metadata keys:
+
+resource "google_storage_bucket" "metadata_keys_bucket" {
+  name                        = "structhub-metadata-keys-upload-bucket-${local.environment}"
+  location                    = "us"
+  uniform_bucket_level_access = true
+  cors {
+    origin          = ["https://stage.structhub.io", "http://localhost:3000", "https://structhub.io"]
+    method          = ["GET", "HEAD", "PUT", "POST", "DELETE"]
+    response_header = ["*"]
+    max_age_seconds = 3600
+  }
+}
+
+resource "google_cloud_run_v2_service" "metadata_keys_cloud_run" {
+  for_each = toset(local.us_regions)
+
+  name     = "${local.metadata_keys_service_name_prefix}${local.metadata_keys_domain_suffix}-${each.key}"
+  location = each.key
+  template {
+    service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+    scaling {
+      max_instance_count = local.region_instance_counts[each.key].indexer_max_inst
+      min_instance_count = local.region_instance_counts[each.key].indexer_min_inst
+    }
+
+    containers {
+      ports {
+        container_port = local.metadata_keys_port
+      }
+      image = local.metadata_keys_image
+      env {
+        name  = "METADATA_SERVER_URL"
+        value = local.environment == "prod" ? "metadata.structhub.io" : "stage-metadata.structhub.io"
+      }
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = local.environment == "prod" ? "structhub-412620" : "structhub-412620"
+      }
+      env {
+        name  = "GCP_CREDIT_USAGE_TOPIC"
+        value = "structhub-credit-usage-topic${local.metadata_keys_domain_suffix}"
+      }
+        env {
+          name  = "FIRESTORE_DB"
+          value = google_firestore_database.firestore.name
+        }
+      env {
+        name  = "UPLOADS_FOLDER"
+        value = local.environment == "prod" ? "/app/uploads" : "/app/uploads"
+      }
+      env {
+        name = "REDIS_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_HOST" : "REDIS_HOST_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "REDIS_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_PASSWORD" : "REDIS_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "PSQL_HOST"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_HOST" : "PSQL_HOST_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PASSWORD" : "PSQL_PASSWORD_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_USERNAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_USERNAME" : "PSQL_USERNAME_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PSQL_DATABASE"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_DATABASE" : "PSQL_DATABASE_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+
+      env {
+        name = "PSQL_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PSQL_PORT" : "PSQL_PORT_STAGE"
+            version = "latest"
+          }
+        }
+
+      }
+      env {
+        name = "PINECONE_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PINECONE_API_KEY" : "PINECONE_API_KEY_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "PINECONE_INDEX_NAME"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "PINECONE_INDEX_NAME" : "PINECONE_INDEX_NAME_STAGE"
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "SECRET_KEY" : "SECRET_KEY_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "REDIS_PORT"
+        value_source {
+          secret_key_ref {
+            secret  = local.environment == "prod" ? "REDIS_PORT" : "REDIS_PORT_STAGE"
+            version = "latest"
+          }
+        }
+      }
+      resources {
+        limits = {
+          cpu    = local.metadata_keys_cpu
+          memory = local.metadata_keys_memory
+        }
+      }
+    }
+    timeout                          = "690s"
+    max_instance_request_concurrency = local.indexer_concurrent_requests_per_inst
+  }
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+  depends_on = [
+    google_project_iam_member.indexer_eventreceiver,
+    google_project_iam_member.indexer_runinvoker,
+    google_project_iam_member.indexer_pubsubpublisher,
+    google_project_service.run_api,
+    google_project_iam_member.secretaccessor
+  ]
+}
+resource "google_pubsub_topic" "metadata_keys_fileupload_event_topic" {
+  name = "metadata-keys-file-upload-event-topic-${local.environment}"
+}
+# Define Eventarc triggers for each region
+resource "google_eventarc_trigger" "metdata_keys_fileupload_trigger" {
+  for_each = toset(local.us_regions)
+
+  name     = "metdata-keys-file-upload-trigger-${each.key}-${local.environment}"
+  location = "us"
+
+  matching_criteria {
+    attribute = "type"
+    value     = "google.cloud.storage.object.v1.finalized"
+  }
+  matching_criteria {
+    attribute = "bucket"
+    value     = google_storage_bucket.metadata_keys_bucket.name
+  }
+
+  service_account = "xtract-fe-service-account@structhub-412620.iam.gserviceaccount.com"
+
+  destination {
+    cloud_run_service {
+      service = google_cloud_run_v2_service.metadata_keys_cloud_run[each.key].name
+      region  = each.key
+    }
+  }
+  depends_on = [
+    google_storage_bucket.metadata_keys_bucket,
+    google_pubsub_topic.metadata_keys_fileupload_event_topic,
+    google_cloud_run_v2_service.metadata_keys_cloud_run
   ]
 }

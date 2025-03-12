@@ -3,6 +3,7 @@ import sys
 import psycopg2
 from psycopg2 import sql, errors
 import time
+import json
 
 # Retrieve PostgreSQL connection parameters from environment variables
 db_params = {
@@ -489,4 +490,102 @@ def update_data_source_by_id(data_source_id, **kwargs):
 
     except Exception as e:
         print(f"Error connecting to PostgreSQL for DataSource update: {str(e)}")
+        sys.exit("Function execution failed.")
+
+
+
+def update_file_generated_metadata(file_id, generated_metadata):
+    """
+    Updates the "generatedMetadata" column in the File table with the provided dictionary.
+    Assumes the column is JSON or JSONB.
+    """
+    if not file_id:
+        raise ValueError("File ID is required.")
+    if generated_metadata is None:
+        # If you want to allow clearing it, you could accept None. 
+        # Otherwise, raise an error or do nothing.
+        generated_metadata = {}
+
+    try:
+        with psycopg2.connect(**db_params) as connection:
+            with connection.cursor() as cursor:
+                connection.autocommit = False
+                lock_id = int(time.time() * 1000)
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
+
+                try:
+                    print(f"Updating generatedMetadata for file_id={file_id}")
+                    # Convert dict to JSON (if your column is JSONB, this still works)
+                    metadata_json = json.dumps(generated_metadata)
+
+                    cursor.execute(
+                        'UPDATE "File" SET "generatedMetadata" = %s WHERE "id" = %s',
+                        (metadata_json, file_id),
+                    )
+                    connection.commit()
+                    print("Transaction completed successfully.")
+                    return "success"
+
+                except Exception as e:
+                    connection.rollback()
+                    print(f"Error during update_file_generated_metadata: {str(e)}")
+                    sys.exit("Function execution failed.")
+
+    except Exception as e:
+        print(f"Error connecting to PostgreSQL: {str(e)}")
+        sys.exit("Function execution failed.")
+
+def update_project(project_id, metadata_prompt=None, metadata_keys=None):
+    """
+    Updates the Project table record with the given project_id.
+    Allows updating metadataPrompt, metadataKeys, or both, if provided.
+    """
+    if not project_id:
+        raise ValueError("project_id is required.")
+    
+    updates = []
+    values = []
+    
+    # Only update columns that have a non-None value
+    if metadata_prompt is not None:
+        updates.append('"metadataPrompt" = %s')
+        values.append(metadata_prompt)
+    if metadata_keys is not None:
+        # Convert dict or list to JSON if needed, or store raw string if that's how you're storing it
+        if isinstance(metadata_keys, (dict, list)):
+            metadata_keys = json.dumps(metadata_keys)
+        updates.append('"metadataKeys" = %s')
+        values.append(metadata_keys)
+    
+    if not updates:
+        # Nothing to update
+        print("No updates requested for project.")
+        return "no_updates"
+    
+    set_clause = ", ".join(updates)
+    values.append(project_id)
+    
+    query = f'UPDATE "Project" SET {set_clause} WHERE "id" = %s'
+    
+    try:
+        with psycopg2.connect(**db_params) as connection:
+            with connection.cursor() as cursor:
+                connection.autocommit = False
+                lock_id = int(time.time() * 1000)
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
+
+                try:
+                    print(f"Updating Project {project_id} with: {updates}")
+                    cursor.execute(query, values)
+                    connection.commit()
+                    print("Transaction completed successfully.")
+                    return "success"
+
+                except Exception as e:
+                    connection.rollback()
+                    print(f"Error during update_project: {str(e)}")
+                    sys.exit("Function execution failed.")
+
+    except Exception as e:
+        print(f"Error connecting to PostgreSQL: {str(e)}")
         sys.exit("Function execution failed.")
