@@ -1,0 +1,19 @@
+# Use the official Python image as the base image
+FROM python:3.10-slim
+
+# Set the working directory in the container
+WORKDIR /app
+RUN mkdir /app/uploads
+COPY requirements-auto-metadata.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY ./shared /app/shared
+COPY ./SAKeys/fe-key.json key.json
+# Copy the application code to the container
+COPY app-auto-metadata.py app.py
+
+# Expose port 5000 for the Flask application
+EXPOSE 5000
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/key.json
+# Run app.py when the container launches
+CMD ["gunicorn", "-w", "1", "--worker-connections", "1", "-b", "0.0.0.0:5000","--timeout", "0", "app:app"]

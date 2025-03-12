@@ -27,3 +27,4 @@ cython
 psycopg2-binary
 tiktoken
 python-dateutil
+google-genai
